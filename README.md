@@ -176,3 +176,8 @@ apex-gp/
    │  └─ gfx/                textures.ts, environment.ts, Effects.tsx, SpeedBlurEffect.ts
    └─ ui/                    HUD, touch controls, menus, loading screen, styles
 ```
+
+## License
+
+The code is released under the [MIT License](./LICENSE). The bundled HDRI is
+CC0; see [ASSETS.md](./ASSETS.md) for asset attribution.
