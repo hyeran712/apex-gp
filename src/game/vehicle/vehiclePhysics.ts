@@ -46,13 +46,15 @@ export const CAR = {
 const G = 9.81
 const RHO = 1.2
 
-const SURFACE_GRIP: Record<Surface, number> = { asphalt: 2.05, curb: 1.78, grass: 0.72, gravel: 0.58 }
+const SURFACE_GRIP: Record<Surface, number> = { asphalt: 2.05, curb: 1.78, grass: 0.95, gravel: 0.9 }
 /** rolling drag as a fraction of weight, plus a speed-proportional term */
 const SURFACE_DRAG: Record<Surface, [number, number]> = {
   asphalt: [0.012, 0],
   curb: [0.02, 0],
-  grass: [0.11, 14],
-  gravel: [0.3, 46],
+  // Off-track still costs time (less than half the grip of asphalt, extra drag)
+  // but the car can accelerate back out instead of crawling.
+  grass: [0.06, 8],
+  gravel: [0.1, 14],
 }
 
 export interface VehicleInput {

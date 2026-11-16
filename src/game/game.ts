@@ -52,6 +52,7 @@ class Game {
     const st = useStore.getState()
     this.audio.start()
     this.audio.setVolume(st.volume)
+    this.audio.setEngineSound(st.engine)
     this.audio.resume()
     this.sim.placeOnGrid()
     this.timer.reset(this.sim.state.loc.s)

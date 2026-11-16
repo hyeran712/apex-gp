@@ -20,12 +20,71 @@ function distortion(amount: number) {
   return curve
 }
 
+export type EngineSound = 'v10' | 'v8' | 'v6'
+
+interface EngineProfile {
+  label: string
+  /** exhaust pulses per crank revolution (cylinders / 2 for a four-stroke) */
+  pulses: number
+  /** pitch scale: the sim revs to 12,500 rpm, older F1 engines went far higher */
+  pitch: number
+  /** 0..1 turbo / MGU whine level */
+  turbo: number
+  /** five voices: frequency as a multiple of the firing frequency */
+  mul: number[]
+  types: OscillatorType[]
+  levels: number[]
+  detune: number[]
+  drive: number
+  /** low-pass cutoff = base + rpm * rpmK + throttle * (loadK + rpm * loadRpmK) */
+  filter: [number, number, number, number]
+  q: number
+  gain: number
+}
+
+export const ENGINE_SOUNDS: Record<EngineSound, EngineProfile> = {
+  // 3.0 V10 era: ten cylinders at ~19,000 rpm, a smooth wail whose
+  // fundamental reaches ~1.5 kHz, with the octave and half order behind it
+  v10: {
+    label: 'F1 V10', pulses: 5, pitch: 1.5, turbo: 0,
+    mul: [1, 0.5, 2, 0.2, 3], types: ['sawtooth', 'triangle', 'triangle', 'sine', 'sine'],
+    levels: [0.46, 0.3, 0.2, 0.2, 0.07], detune: [0, 4, -6, 0, 3],
+    drive: 1.5, filter: [700, 2400, 1800, 5600], q: 2.2, gain: 1,
+  },
+  // 2.4 V8 era: flat-plane crank at ~18,000 rpm, harder-edged and a little lower
+  v8: {
+    label: 'F1 V8', pulses: 4, pitch: 1.44, turbo: 0,
+    mul: [1, 0.5, 2, 0.25, 1.5], types: ['sawtooth', 'sawtooth', 'triangle', 'sine', 'square'],
+    levels: [0.5, 0.34, 0.16, 0.16, 0.06], detune: [0, 6, -8, 0, 4],
+    drive: 2.3, filter: [600, 2000, 1600, 4800], q: 1.8, gain: 1,
+  },
+  // current 1.6 V6 turbo hybrid: lower and rougher, ~600 Hz at the limiter,
+  // muffled by the turbine, with turbo and MGU whine on top
+  v6: {
+    label: 'F1 V6 hybrid', pulses: 3, pitch: 1, turbo: 1,
+    mul: [1, 0.5, 2, 1.5, 0.25], types: ['sawtooth', 'square', 'sawtooth', 'sawtooth', 'triangle'],
+    levels: [0.5, 0.36, 0.14, 0.1, 0.3], detune: [0, 7, -9, 5, 0],
+    drive: 2.8, filter: [420, 1400, 1200, 3200], q: 1.2, gain: 1,
+  },
+}
+
+/** Optional recorded engine loop; see ASSETS.md. Used instead of the synthesiser when present. */
+export const ENGINE_SAMPLE_URL = 'audio/engine_loop.mp3'
+/** engine speed the recording was made at, so it can be pitched to the simulated rpm */
+const ENGINE_SAMPLE_RPM = 9000
+
 export class AudioEngine {
   ctx: AudioContext | null = null
   private master!: GainNode
   private noise!: AudioBuffer
   private osc: OscillatorNode[] = []
-  private oscMul = [1, 0.5, 2, 1.5, 0.25]
+  private oscGain: GainNode[] = []
+  private shaper!: WaveShaperNode
+  private profile: EngineProfile = ENGINE_SOUNDS.v10
+  private turboOsc!: OscillatorNode
+  private turboGain!: GainNode
+  private synthGain!: GainNode
+  private sample: AudioBufferSourceNode | null = null
   private engineFilter!: BiquadFilterNode
   private engineGain!: GainNode
   private intakeGain!: GainNode
@@ -57,21 +116,24 @@ export class AudioEngine {
     this.master.connect(comp).connect(ctx.destination)
 
     // --- engine: stacked harmonics -> soft clip -> throttle-controlled low-pass
-    const shaper = ctx.createWaveShaper()
-    shaper.curve = distortion(2.6)
+    const shaper = (this.shaper = ctx.createWaveShaper())
     shaper.oversample = '2x'
     this.engineFilter = ctx.createBiquadFilter()
-    this.engineFilter.type = 'lowpass'; this.engineFilter.Q.value = 1.2
+    this.engineFilter.type = 'lowpass'
     this.engineGain = ctx.createGain(); this.engineGain.gain.value = 0
-    const types: OscillatorType[] = ['sawtooth', 'square', 'sawtooth', 'sawtooth', 'triangle']
-    const levels = [0.5, 0.34, 0.16, 0.12, 0.3]
-    types.forEach((type, i) => {
-      const o = ctx.createOscillator(); o.type = type
-      o.detune.value = [0, 7, -9, 5, 0][i]
-      const g = ctx.createGain(); g.gain.value = levels[i]
+    for (let i = 0; i < 5; i++) {
+      const o = ctx.createOscillator()
+      const g = ctx.createGain()
       o.connect(g).connect(shaper); o.start()
-      this.osc.push(o)
-    })
+      this.osc.push(o); this.oscGain.push(g)
+    }
+    this.applyProfile()
+    // turbo / MGU-H whine (only audible on the hybrid profile)
+    this.turboOsc = ctx.createOscillator(); this.turboOsc.type = 'sine'
+    this.turboGain = ctx.createGain(); this.turboGain.gain.value = 0
+    this.turboOsc.connect(this.turboGain).connect(this.master)
+    this.turboOsc.start()
+    void this.loadSample(ctx)
     shaper.connect(this.engineFilter).connect(this.engineGain).connect(this.master)
 
     const loop = (filter: BiquadFilterNode, gain: GainNode, rate = 1) => {
@@ -99,6 +161,41 @@ export class AudioEngine {
     this.curbOsc.start()
   }
 
+  /**
+   * If a recorded loop has been added at ENGINE_SAMPLE_URL, play it through
+   * the same throttle filter and gain, pitched by rpm, and mute the oscillators.
+   */
+  private async loadSample(ctx: AudioContext) {
+    try {
+      const res = await fetch(ENGINE_SAMPLE_URL)
+      if (!res.ok || (res.headers.get('content-type') ?? '').includes('text/html')) return
+      const buffer = await ctx.decodeAudioData(await res.arrayBuffer())
+      const src = ctx.createBufferSource()
+      src.buffer = buffer; src.loop = true
+      src.connect(this.engineFilter)
+      src.start()
+      this.sample = src
+      this.oscGain.forEach(g => { g.gain.value = 0 })
+    } catch { /* no usable recording: keep the synthesiser */ }
+  }
+
+  /** Switch the engine note. Takes effect immediately, also while driving. */
+  setEngineSound(name: EngineSound) {
+    this.profile = ENGINE_SOUNDS[name] ?? ENGINE_SOUNDS.v10
+    if (this.ctx) this.applyProfile()
+  }
+
+  private applyProfile() {
+    const p = this.profile
+    this.shaper.curve = distortion(p.drive)
+    this.engineFilter.Q.value = p.q
+    this.osc.forEach((o, i) => {
+      o.type = p.types[i]
+      o.detune.value = p.detune[i]
+      this.oscGain[i].gain.value = this.sample ? 0 : p.levels[i]
+    })
+  }
+
   setVolume(v: number) {
     this.volume = v
     if (this.ctx) this.master.gain.setTargetAtTime(v, this.ctx.currentTime, 0.05)
@@ -111,7 +208,7 @@ export class AudioEngine {
   silence() {
     if (!this.ctx) return
     const t = this.ctx.currentTime
-    for (const g of [this.engineGain, this.intakeGain, this.skidGain, this.surfaceGain, this.windGain, this.brakeGain, this.curbGain]) {
+    for (const g of [this.engineGain, this.turboGain, this.intakeGain, this.skidGain, this.surfaceGain, this.windGain, this.brakeGain, this.curbGain]) {
       g.gain.setTargetAtTime(0, t, 0.08)
     }
   }
@@ -145,15 +242,18 @@ export class AudioEngine {
     const t = ctx.currentTime
     const set = (p: AudioParam, v: number, tc = 0.03) => p.setTargetAtTime(v, t, tc)
 
-    // V6: three firing pulses per crank revolution
-    const f = (s.rpm / 60) * 3
-    this.osc.forEach((o, i) => set(o.frequency, f * this.oscMul[i], 0.015))
+    const p = this.profile
+    const f = (s.rpm / 60) * p.pulses * p.pitch
+    if (this.sample) set(this.sample.playbackRate, Math.max(0.3, s.rpm / ENGINE_SAMPLE_RPM), 0.02)
+    this.osc.forEach((o, i) => set(o.frequency, f * p.mul[i], 0.015))
     const rpmN = s.rpm / CAR.redline
     const load = s.throttle
-    set(this.engineFilter.frequency, 500 + rpmN * 1700 + load * (1500 + rpmN * 4200), 0.04)
-    let eg = 0.1 + rpmN * 0.1 + load * (0.2 + rpmN * 0.2)
+    set(this.engineFilter.frequency, p.filter[0] + rpmN * p.filter[1] + load * (p.filter[2] + rpmN * p.filter[3]), 0.04)
+    let eg = (0.1 + rpmN * 0.1 + load * (0.2 + rpmN * 0.2)) * p.gain
     if (s.limiter) eg *= 0.6 + 0.4 * Math.sin(t * 90)
     set(this.engineGain.gain, eg, 0.03)
+    set(this.turboOsc.frequency, 2200 + rpmN * 5200 + load * 1400, 0.25)
+    set(this.turboGain.gain, p.turbo * rpmN * (0.006 + load * 0.02), 0.2)
     set(this.intakeFilter.frequency, 900 + rpmN * 2600)
     set(this.intakeGain.gain, load * rpmN * 0.1, 0.05)
 

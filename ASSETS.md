@@ -45,3 +45,22 @@ game asset.
    - An optional `steering_wheel` node turns with the input.
    - Nodes with `helmet` or `driver` in the name are hidden in cockpit view.
 3. Add the model's author, source URL and licence to the table above.
+
+## About the engine sound
+
+The engine note is **synthesised**, not recorded. Three voicings are tuned to
+the firing frequencies of real Formula 1 engine eras (V10 at about 19,000 rpm,
+V8 at about 18,000 rpm, and the current V6 turbo hybrid) and are selectable in
+the menu. They follow the right pitch, load and gear-shift behaviour, but a
+synthesiser cannot reproduce the exact timbre of a real car.
+
+### Using a real recording
+
+1. Put a seamless engine loop at `public/audio/engine_loop.mp3`, recorded at a
+   steady engine speed (the code assumes 9,000 rpm; change
+   `ENGINE_SAMPLE_RPM` in `src/game/audio/AudioEngine.ts` if yours differs).
+2. It is picked up automatically, pitched to the simulated rpm and shaped by
+   throttle; the synthesiser is muted.
+3. Only use audio you have the rights to (your own recording, CC0, or a
+   licence that allows redistribution), and add its author, source and licence
+   to the table above. Broadcast or game audio of real F1 cars is copyrighted.

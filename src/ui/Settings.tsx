@@ -1,3 +1,4 @@
+import { ENGINE_SOUNDS, type EngineSound } from '../game/audio/AudioEngine'
 import { game } from '../game/game'
 import { IS_TOUCH_DEVICE } from '../game/device'
 import { QUALITY, QUALITY_ORDER, resolveQuality } from '../game/quality'
@@ -8,6 +9,7 @@ export function Settings() {
   const quality = useStore(s => s.quality)
   const adaptive = useStore(s => s.adaptive)
   const volume = useStore(s => s.volume)
+  const engine = useStore(s => s.engine)
   const setSetting = useStore(s => s.setSetting)
   const q = resolveQuality(quality, IS_TOUCH_DEVICE)
   return (
@@ -28,6 +30,15 @@ export function Settings() {
         <label htmlFor="adaptive">Adaptive resolution</label>
         <button id="adaptive" className={`toggle ${adaptive ? 'on' : ''}`} role="switch" aria-checked={adaptive}
           onClick={() => setSetting({ adaptive: !adaptive })}><span /></button>
+      </div>
+      <div className="field">
+        <label>Engine sound</label>
+        <div className="segmented three" role="radiogroup" aria-label="Engine sound">
+          {(Object.keys(ENGINE_SOUNDS) as EngineSound[]).map(name => (
+            <button key={name} role="radio" aria-checked={engine === name} className={engine === name ? 'on' : ''}
+              onClick={() => { setSetting({ engine: name }); game.audio.setEngineSound(name) }}>{ENGINE_SOUNDS[name].label}</button>
+          ))}
+        </div>
       </div>
       <div className="field row">
         <label htmlFor="volume">Volume</label>

@@ -4,6 +4,7 @@ import { QUALITY } from '../game/quality'
 import { CAMERA_NAMES, useStore } from '../game/store'
 import { formatTime } from '../game/timing/lapTimer'
 import { track } from '../game/track/trackData'
+import { shouldBrake } from '../game/vehicle/autopilot'
 import { CAR } from '../game/vehicle/vehiclePhysics'
 
 const LEDS = 15
@@ -92,7 +93,10 @@ export function HUD() {
       const wrong = heading < -0.35 && s.vx > 4
       const off = s.wheelsOff === 4 && s.speed > 3
       const w = r.current.warn as HTMLElement
-      const msg = wrong ? 'WRONG WAY' : off ? 'OFF TRACK' : ''
+      // braking prompt: arriving at the next corner faster than it can be taken
+      const brakeNow = !wrong && !off && s.brake < 0.5 && shouldBrake(s)
+      const msg = wrong ? 'WRONG WAY' : off ? 'OFF TRACK' : brakeNow ? 'BRAKE' : ''
+      w.classList.toggle('brake', msg === 'BRAKE')
       if (w.textContent !== msg) w.textContent = msg
       w.style.opacity = msg ? '1' : '0'
 

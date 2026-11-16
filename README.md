@@ -117,6 +117,9 @@ working lights, sponsor boards, a bridge, braking boards, trees and hills.
 The collision walls are generated from the same data as the visuals. The
 circuit is flat.
 
+A red **BRAKE** prompt appears when the car is arriving at the next corner
+faster than it can be taken.
+
 **Time trial** (`src/game/timing/lapTimer.ts`) — five-light start, timing from
 the first crossing of the line, 10 ordered checkpoints, sub-step interpolated
 lap times, live delta to your best at each checkpoint, and the best lap saved
@@ -134,8 +137,9 @@ frustum follows the car, analytic sky with a cloud layer, distance fog, ACES
 tone mapping, MSAA / SMAA, ambient occlusion (N8AO), bloom, vignette and a
 speed-dependent radial blur.
 
-**Audio** (`src/game/audio/AudioEngine.ts`) — fully synthesised: engine
-harmonics tied to RPM and throttle, shift cut and overrun pops, tyre scrub,
+**Audio** (`src/game/audio/AudioEngine.ts`) — fully synthesised: three
+selectable engine voicings (F1 V10, V8 and V6 hybrid eras) tied to RPM and
+throttle, with a slot for a recorded loop (see ASSETS.md), shift cut and overrun pops, tyre scrub,
 brake hiss, kerb rumble, grass/gravel noise, wind and impacts.
 
 **Performance** — Low / Medium / High / Ultra presets (resolution, shadow map
