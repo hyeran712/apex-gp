@@ -1,6 +1,6 @@
 # APEX GP — Time Trial
 
-A single-player, browser-based Formula-style time-trial game: one car, two
+A single-player, browser-based Formula-style time-trial game: one car, three
 fictional circuits, one mode. Built with
 React, Vite, TypeScript, Three.js / React Three Fiber, Rapier and the Web
 Audio API. No installation is needed to play the built version.
@@ -73,6 +73,7 @@ The build uses relative URLs, so it can be hosted from any path.
 | --- | --- | --- |
 | Circuito Costa Verde | 3.117 km | Technical: a 28 m-radius hairpin and an S-curve section |
 | Autodromo Monte Alto | 4.129 km | Fast: two long straights and sweeping corners, slowest corner over 100 km/h |
+| Sierra Norte Raceway | 4.190 km | Mixed: a tight left hairpin, a long right-hand loop, a 900 m back straight and esses |
 
 Pick the circuit in the main menu. The page reloads to build the chosen
 circuit, and each one keeps its own best lap. `?track=monte-alto` in the URL
@@ -89,7 +90,7 @@ npm run test:sim
 Runs the vehicle physics, barrier collisions, an autopilot driving two full
 laps, the lap-validity rules and a 30 fps vs 144 fps determinism check
 headlessly in Node (no browser needed). `APEX_TRACK=monte-alto npm run
-test:sim` runs them on the second circuit. Adding `?autopilot` to the game URL
+test:sim` (or `sierra-norte`) runs them on another circuit. Adding `?autopilot` to the game URL
 lets the same test driver lap the circuit in the browser.
 
 ## What is implemented

@@ -73,6 +73,29 @@ export const TRACKS: TrackDef[] = [
       [-640, 322], [-728, 244], [-756, 136], [-716, 44], [-640, 6],
     ],
   },
+  {
+    id: 'sierra-norte',
+    name: 'Sierra Norte Raceway',
+    blurb: 'Mixed: two hairpins, a long back straight and esses',
+    points: [
+      [-610, 0], [-450, 0], [-300, 0], [-150, 0], [0, 0], [200, 0], [400, 0], [500, 0],
+      // T1: medium right, then a short run north
+      [570, 12], [604, 60], [600, 130], [596, 230],
+      // T2: right onto the infield straight
+      [580, 320], [530, 372], [450, 384], [330, 384],
+      // T3: tight left hairpin
+      [240, 386], [190, 400], [166, 440], [190, 480], [240, 494], [320, 496],
+      // T4-T5: long right-hand loop onto the back straight
+      [420, 500], [480, 520], [500, 580], [480, 640], [420, 660],
+      [200, 664], [-100, 660], [-420, 652],
+      // T6: right, heading back south
+      [-560, 620], [-622, 540],
+      // T7-T9: esses
+      [-660, 420], [-622, 310], [-660, 200],
+      // T10: final right onto the main straight
+      [-676, 96], [-652, 24],
+    ],
+  },
 ]
 
 function pickTrack(): TrackDef {
