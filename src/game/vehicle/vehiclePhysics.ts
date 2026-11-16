@@ -28,7 +28,7 @@ export const CAR = {
   halfWidth: 0.98,
   // aero
   dragArea: 1.25, // Cd * A
-  liftArea: 3.7, // Cl * A (downforce)
+  liftArea: 4.1, // Cl * A (downforce)
   aeroFront: 0.42,
   // drivetrain
   power: 745_000, // W
@@ -46,7 +46,7 @@ export const CAR = {
 const G = 9.81
 const RHO = 1.2
 
-const SURFACE_GRIP: Record<Surface, number> = { asphalt: 1.8, curb: 1.5, grass: 0.72, gravel: 0.58 }
+const SURFACE_GRIP: Record<Surface, number> = { asphalt: 2.05, curb: 1.78, grass: 0.72, gravel: 0.58 }
 /** rolling drag as a fraction of weight, plus a speed-proportional term */
 const SURFACE_DRAG: Record<Surface, [number, number]> = {
   asphalt: [0.012, 0],
@@ -315,13 +315,13 @@ export class VehicleSim {
     const fzF = Math.max(300, (weight * CAR.cgToRear) / CAR.wheelbase + downforce * CAR.aeroFront - transfer)
     const fzR = Math.max(300, (weight * CAR.cgToFront) / CAR.wheelbase + downforce * (1 - CAR.aeroFront) + transfer)
     const capF = grip[0] * fzF
-    const capR = grip[1] * fzR * 1.06
+    const capR = grip[1] * fzR * 1.12
 
     // --- steering -----------------------------------------------------------
     // Limit lock to what the tyres can use at this speed (+ a little beyond the peak).
     const latAccMax = grip[0] * (G + downforce / CAR.mass)
     const peakSlip = Math.tan(Math.PI / (2 * CAR.tyreC)) / CAR.tyreB
-    const usable = (CAR.wheelbase * latAccMax) / Math.max(v2, 1) + peakSlip * 1.15
+    const usable = (CAR.wheelbase * latAccMax) / Math.max(v2, 1) + peakSlip * 1.0
     const lock = Math.min(CAR.maxSteer, usable)
     const delta = s.steerInput * lock
     s.steerAngle = delta
@@ -392,9 +392,9 @@ export class VehicleSim {
     // Longitudinal force gets what the lateral demand leaves (plus a little
     // extra so the car can still be provoked), then lateral force is trimmed.
     const assist = input.hardBrake ? 1.22 : 1.08
-    const combine = (Fx: number, Fy: number, cap: number, over: number) => {
+    const combine = (Fx: number, Fy: number, cap: number, over: number, floor = 0.3) => {
       const usedLat = Math.min(1, Math.abs(Fy) / cap)
-      const avail = cap * Math.max(0.3, Math.sqrt(1 - usedLat * usedLat)) * over
+      const avail = cap * Math.max(floor, Math.sqrt(1 - usedLat * usedLat)) * over
       let excess = 0
       if (Math.abs(Fx) > avail) {
         excess = Math.abs(Fx) / avail - 1
@@ -407,7 +407,10 @@ export class VehicleSim {
       return [Fx, Fy, excess] as const
     }
     const front = combine(FxF, FyF, capF, assist)
-    const rear = combine(FxR, FyR, capR, drive > 0 && brake < 0.05 ? 1.1 : assist)
+    // under power the rear always keeps a useful share of its grip for traction,
+    // so the car still pulls through a corner at full lock
+    const powered = drive > 0 && brake < 0.05
+    const rear = combine(FxR, FyR, capR, powered ? 1.12 : assist, powered ? 0.5 : 0.3)
     FxF = front[0]; FyF = front[1]
     FxR = rear[0]; FyR = rear[1]
 

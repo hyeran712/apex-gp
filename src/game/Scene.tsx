@@ -252,7 +252,11 @@ export function Scene() {
           <World assets={assets} q={q} />
           <Car assets={assets} />
           <CameraRig />
-          {q.post && <Effects q={q} />}
+          {/* Rebuild the post-processing chain whenever the render resolution changes:
+              the AO pass keeps buffers of the old size otherwise and draws a
+              displaced dark copy of the scene (a "ghost car") after adaptive
+              resolution kicks in. */}
+          {q.post && <Effects key={`${quality}-${dpr}`} q={q} />}
           <Warmup onReady={ready} />
         </>
       )}

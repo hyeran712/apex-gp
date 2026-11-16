@@ -1,5 +1,5 @@
 /**
- * Circuit definition for "Circuito Costa Verde" (fictional).
+ * Circuit definitions (all fictional) and the track geometry derived from the selected one.
  *
  * Everything gameplay-related about the track lives here and has no rendering
  * or DOM dependency, so the physics / lap timing can be simulated headlessly
@@ -17,21 +17,87 @@ export const TRACK_HALF_WIDTH = 7.5
 export const CURB_WIDTH = 1.6
 export const SAMPLE_SPACING = 2
 
-/** Closed-loop control points (x, z) in metres. */
-const CONTROL_POINTS: [number, number][] = [
-  [-480, 0], [-240, 0], [0, 0], [240, 0], [470, 0], [560, 0],
-  // T1-T2: tight hairpin
-  [612, 9], [634, 46], [612, 83], [560, 92],
-  [480, 96],
-  // T3: fast left sweeper
-  [380, 108], [296, 150], [248, 232], [236, 320],
-  // T4: long right
-  [200, 408], [112, 452], [10, 436],
-  // T5-T8: S-curves
-  [-82, 388], [-168, 420], [-254, 384], [-340, 420], [-430, 404],
-  // T9-T10: fast right sweeps back to the main straight
-  [-540, 350], [-628, 262], [-664, 150], [-640, 58], [-572, 8],
+export interface TrackDef {
+  id: string
+  name: string
+  /** one-line character description for the menu */
+  blurb: string
+  /**
+   * Closed-loop control points (x, z) in metres. Every circuit shares one
+   * convention so the pit complex fits: the start straight runs along +X
+   * through the origin, and the rest of the lap lies on the +Z side.
+   */
+  points: [number, number][]
+}
+
+export const TRACKS: TrackDef[] = [
+  {
+    id: 'costa-verde',
+    name: 'Circuito Costa Verde',
+    blurb: 'Technical: tight hairpin and S-curves',
+    points: [
+      [-480, 0], [-240, 0], [0, 0], [240, 0], [470, 0], [560, 0],
+      // T1-T2: tight hairpin
+      [612, 9], [634, 46], [612, 83], [560, 92],
+      [480, 96],
+      // T3: fast left sweeper
+      [380, 108], [296, 150], [248, 232], [236, 320],
+      // T4: long right
+      [200, 408], [112, 452], [10, 436],
+      // T5-T8: S-curves
+      [-82, 388], [-168, 420], [-254, 384], [-340, 420], [-430, 404],
+      // T9-T10: fast right sweeps back to the main straight
+      [-540, 350], [-628, 262], [-664, 150], [-640, 58], [-572, 8],
+    ],
+  },
+  {
+    id: 'monte-alto',
+    name: 'Autodromo Monte Alto',
+    blurb: 'Fast: long straights and sweeping corners',
+    points: [
+      [-560, 0], [-420, 0], [-280, 0], [0, 0], [280, 0], [560, 0], [690, 0],
+      // T1: fast right
+      [800, 22], [872, 96], [892, 200],
+      // T2-T3: high-speed flick
+      [884, 300], [850, 372], [862, 450],
+      // T4: right onto the back straight
+      [848, 540], [782, 606], [680, 626],
+      [420, 628], [160, 624],
+      // T5: heavy braking, right
+      [40, 612], [-36, 548], [-52, 460],
+      // T6: left
+      [-70, 392], [-130, 348], [-220, 336],
+      // T7-T8: esses
+      [-330, 352], [-430, 322], [-530, 344],
+      // T9: long final right-hander
+      [-640, 322], [-728, 244], [-756, 136], [-716, 44], [-640, 6],
+    ],
+  },
 ]
+
+function pickTrack(): TrackDef {
+  let id: string | null | undefined
+  try {
+    const g = globalThis as unknown as { location?: { search: string }; localStorage?: Storage; process?: { env?: Record<string, string> } }
+    id = (g.location && new URLSearchParams(g.location.search).get('track')) || g.localStorage?.getItem(TRACK_KEY) || g.process?.env?.APEX_TRACK
+  } catch { /* storage unavailable */ }
+  return TRACKS.find(t => t.id === id) ?? TRACKS[0]
+}
+
+const TRACK_KEY = 'apex-gp:track'
+
+/**
+ * The circuit is chosen once per page load (geometry, colliders and scenery
+ * are all derived from it at start-up); switching circuits reloads the page.
+ */
+export const trackDef: TrackDef = pickTrack()
+
+export function selectTrack(id: string) {
+  try { localStorage.setItem(TRACK_KEY, id) } catch { /* ignore */ }
+  const url = new URL(location.href)
+  url.searchParams.delete('track')
+  location.replace(url.toString())
+}
 
 export interface TrackSample {
   x: number
@@ -88,7 +154,7 @@ function smooth(values: number[], radius: number): number[] {
 
 function buildTrack(): Track {
   const curve = new CatmullRomCurve3(
-    CONTROL_POINTS.map(([x, z]) => new Vector3(x, 0, z)),
+    trackDef.points.map(([x, z]) => new Vector3(x, 0, z)),
     true,
     'centripetal',
   )
@@ -210,6 +276,26 @@ function buildTrack(): Track {
 }
 
 export const track: Track = buildTrack()
+
+export interface Corner { index: number; s: number; k: number }
+
+/** Corner apexes (local curvature peaks), in lap order. Used to place scenery. */
+export const corners: Corner[] = (() => {
+  const { samples, count } = track
+  const out: Corner[] = []
+  const win = Math.round(60 / SAMPLE_SPACING)
+  for (let i = 0; i < count; i++) {
+    const a = Math.abs(samples[i].k)
+    if (a < 0.006) continue
+    let peak = true
+    for (let j = -win; j <= win && peak; j++) {
+      const o = Math.abs(samples[(i + j + count) % count].k)
+      if (o > a || (o === a && j < 0)) peak = false
+    }
+    if (peak) out.push({ index: i, s: samples[i].s, k: samples[i].k })
+  }
+  return out
+})()
 
 export interface TrackLocation {
   /** nearest sample index */

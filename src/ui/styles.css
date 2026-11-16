@@ -70,6 +70,12 @@ kbd {
 .btn:hover, .btn:focus-visible { background: rgba(255, 255, 255, 0.12); border-color: rgba(255, 255, 255, 0.3); transform: translateX(3px); outline: none; }
 .btn.primary { background: var(--red); border-color: var(--red); color: #fff; }
 .btn.primary:hover, .btn.primary:focus-visible { background: #ff4a57; }
+.circuits { display: grid; gap: 6px; }
+.circuits button { display: grid; gap: 2px; text-align: left; padding: 9px 12px; border: 1px solid var(--line); background: rgba(255, 255, 255, 0.04); }
+.circuits button b { font-size: 14px; font-weight: 700; }
+.circuits button span { font-size: 11px; color: var(--dim); }
+.circuits button.on { border-color: var(--red); background: rgba(255, 43, 58, 0.14); box-shadow: inset 3px 0 0 var(--red); }
+.circuits button:focus-visible { outline: 2px solid var(--red); outline-offset: 1px; }
 .settings { display: grid; gap: 12px; padding-top: 6px; }
 .field { display: grid; gap: 7px; }
 .field.row { grid-template-columns: 1fr auto; align-items: center; }

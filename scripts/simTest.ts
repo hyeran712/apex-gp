@@ -29,7 +29,7 @@ const input: VehicleInput = { throttle: 0, brake: 0, steer: 0, hardBrake: false 
     if (!t200 && sim.state.speed * 3.6 >= 200) t200 = t
   }
   const v = sim.state.speed * 3.6
-  check('0-100 km/h in 2-3.5 s', t100 > 2 && t100 < 3.5, `${t100.toFixed(2)} s`)
+  check('0-100 km/h in 1.7-3.5 s', t100 > 1.7 && t100 < 3.5, `${t100.toFixed(2)} s`)
   check('0-200 km/h in 4-6.5 s', t200 > 4 && t200 < 6.5, `${t200.toFixed(2)} s`)
   check('speed after 9 s is 250-330 km/h', v > 250 && v < 330, `${v.toFixed(0)} km/h, gear ${sim.state.gear}`)
   check('stays straight without steering', Math.abs(sim.state.loc.d) < 0.2, `offset ${sim.state.loc.d.toFixed(3)} m`)

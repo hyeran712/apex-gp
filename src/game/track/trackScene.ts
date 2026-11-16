@@ -10,7 +10,7 @@ import {
 } from 'three'
 import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import {
-  CURB_WIDTH, GRAVEL_END_MARGIN, GRAVEL_START, PIT, TRACK_HALF_WIDTH, track, type TrackSample,
+  CURB_WIDTH, GRAVEL_END_MARGIN, GRAVEL_START, PIT, TRACK_HALF_WIDTH, corners, track, trackDef, type TrackSample,
 } from './trackData'
 import {
   makeAdStrip, makeAsphalt, makeBillboard, makeChequer, makeConcrete, makeCrowd, makeCurb, makeDecal, makeFence,
@@ -197,6 +197,30 @@ function sidePose(index: number, side: number, extra: number) {
 }
 
 const indexAtS = (s: number) => Math.round((((s % LAP) + LAP) % LAP) / LAP * count) % count
+
+// --- scenery anchors derived from the layout, so every circuit is dressed the same way ---
+/** the three tightest corners outside the pit straight */
+const tightCorners = corners
+  .filter(c => c.s > PIT.after + 120 && c.s < LAP - PIT.before - 160)
+  .sort((a, b) => Math.abs(b.k) - Math.abs(a.k))
+  .slice(0, 3)
+/** first real braking zone of the lap: where its turn-in begins */
+const brakeCorner = (() => {
+  const c = corners.find(q => q.s > 250 && Math.abs(q.k) > 0.008) ?? corners[0]
+  let i = c.index
+  while (Math.abs(samples[i].k) > 0.0025 && i > 0) i--
+  return { ...c, entryS: samples[i].s }
+})()
+/** middle of the longest straight away from the pits, for the sponsor bridge */
+const bridgeS = (() => {
+  let best = LAP / 2, bestD = -1
+  for (let s = PIT.after + 200; s < LAP - PIT.before - 200; s += 20) {
+    if (Math.abs(samples[indexAtS(s)].k) > 0.0015) continue
+    const d = Math.min(...corners.map(c => Math.abs(c.s - s)))
+    if (d > bestD) { bestD = d; best = s }
+  }
+  return best
+})()
 
 // ---------------------------------------------------------------------------
 // scene
@@ -450,7 +474,7 @@ export function buildTrackScene(opts: TrackSceneOptions): TrackScene {
       place(new BoxGeometry(0.35, 1.5, 7.2), gx - 0.1, 6.1, 0),
     ]), darkSteel, 'both')
     const banner = new PlaneGeometry(zr - zl - 1, 0.8); banner.rotateY(-Math.PI / 2)
-    const bt = makeDecal('CIRCUITO COSTA VERDE', '#ffffff', { w: 2048, h: 96 }); textures.push(bt)
+    const bt = makeDecal(trackDef.name.toUpperCase(), '#ffffff', { w: 2048, h: 96 }); textures.push(bt)
     add(place(banner, gx - 0.36, 7.3, (zl + zr) / 2), mat(new MeshBasicMaterial({ map: bt, transparent: true })), 'none')
     for (let i = 0; i < 5; i++) {
       const lm = new MeshStandardMaterial({ color: '#190404', emissive: new Color('#ff1408'), emissiveIntensity: 0, roughness: 0.3 })
@@ -474,9 +498,11 @@ export function buildTrackScene(opts: TrackSceneOptions): TrackScene {
     const seat: BufferGeometry[] = [], struct: BufferGeometry[] = [], roof: BufferGeometry[] = [], trim: BufferGeometry[] = []
     const stands: [number, number][] = [] // [sample index, side]
     for (let k = 0; k < 6; k++) stands.push([indexAtS(-205 + k * 52), -1]) // main straight
-    for (const s of [618, 668, 712]) stands.push([indexAtS(s), -1]) // hairpin
-    for (const s of [1905, 1960]) stands.push([indexAtS(s), 1]) // S-curves
-    for (const s of [2880, 2932]) stands.push([indexAtS(s), -1]) // final corner
+    // two stands on the outside of each of the three tightest corners
+    for (const c of tightCorners) {
+      const side = c.k > 0 ? -1 : 1
+      stands.push([indexAtS(c.s - 28), side], [indexAtS(c.s + 26), side])
+    }
     const q = new Quaternion(), mtx = new Matrix4(), one = new Vector3(1, 1, 1), up = new Vector3(0, 1, 0)
     for (const [idx, side] of stands) {
       const p = sidePose(idx, side, 5)
@@ -511,7 +537,16 @@ export function buildTrackScene(opts: TrackSceneOptions): TrackScene {
   // --- billboards, bridge and braking boards ----------------------------------
   {
     const legs: BufferGeometry[] = []
-    const boards: [number, number][] = [[430, 1], [540, 1], [900, -1], [1090, 1], [1300, -1], [1560, -1], [1790, 1], [2130, -1], [2420, -1], [2650, -1]]
+    // billboards every ~250 m around the lap, away from the pits and the corner grandstands
+    const boards: [number, number][] = []
+    for (let bs = 400, n = 0; bs < LAP - 380; bs += 250, n++) {
+      const side = n % 2 ? -1 : 1
+      const kHere = samples[indexAtS(bs)].k
+      // keep off the inside of corners (little room) and clear of grandstands
+      if (Math.abs(kHere) > 0.004 && Math.sign(kHere) === side) continue
+      if (tightCorners.some(c => Math.abs(c.s - bs) < 120)) continue
+      boards.push([bs, side])
+    }
     boards.forEach(([s, side], n) => {
       const p = sidePose(indexAtS(s), side, 7)
       const bt = makeBillboard(n + 1); bt.anisotropy = opts.anisotropy; textures.push(bt)
@@ -521,7 +556,7 @@ export function buildTrackScene(opts: TrackSceneOptions): TrackScene {
       for (const lx of [-5.5, 5.5]) legs.push(place(new BoxGeometry(0.3, 6, 0.3), lx, 0, 0.3).rotateY(p.yaw).translate(p.x, p.y, p.z))
     })
     // sponsor bridge over the back section
-    const bi = indexAtS(1230), c = samples[bi]
+    const bi = indexAtS(bridgeS), c = samples[bi]
     const wl = c.wallL + 1.2, wr = c.wallR + 1.2, yaw = Math.atan2(-c.tz, c.tx)
     const bridge: BufferGeometry[] = [
       place(new BoxGeometry(0.7, 8, 0.7), 0, 4, -wl), place(new BoxGeometry(0.7, 8, 0.7), 0, 4, wr),
@@ -540,10 +575,10 @@ export function buildTrackScene(opts: TrackSceneOptions): TrackScene {
     add(merged(legs), darkSteel, 'both')
 
     // braking distance boards before the hairpin (left side)
-    const hair = 596
+    const hair = brakeCorner.entryS, brakeSide = brakeCorner.k > 0 ? -1 : 1
     ;[150, 100, 50].forEach(dist => {
       const i = indexAtS(hair - dist), cs = samples[i]
-      const d = -(HALF + 3.2)
+      const d = brakeSide * (HALF + 3.2)
       const t = makeDecal(String(dist), '#111111', { w: 256, h: 128 }); textures.push(t)
       const yawB = Math.atan2(-cs.tz, cs.tx)
       const face = new PlaneGeometry(1.5, 0.75); face.rotateY(-Math.PI / 2)

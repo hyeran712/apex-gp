@@ -1,7 +1,7 @@
 # APEX GP — Time Trial
 
-A single-player, browser-based Formula-style time-trial game: one car, one
-fictional circuit (Circuito Costa Verde, 3.117 km), one mode. Built with
+A single-player, browser-based Formula-style time-trial game: one car, two
+fictional circuits, one mode. Built with
 React, Vite, TypeScript, Three.js / React Three Fiber, Rapier and the Web
 Audio API. No installation is needed to play the built version.
 
@@ -67,6 +67,19 @@ The build uses relative URLs, so it can be hosted from any path.
   `dist/`.
 - **Local check of the built files:** `npm run preview`.
 
+## Circuits
+
+| Circuit | Length | Character |
+| --- | --- | --- |
+| Circuito Costa Verde | 3.117 km | Technical: a 28 m-radius hairpin and an S-curve section |
+| Autodromo Monte Alto | 4.129 km | Fast: two long straights and sweeping corners, slowest corner over 100 km/h |
+
+Pick the circuit in the main menu. The page reloads to build the chosen
+circuit, and each one keeps its own best lap. `?track=monte-alto` in the URL
+also selects one. To add a circuit, append an entry to `TRACKS` in
+`src/game/track/trackData.ts`; kerbs, runoff, barriers, grandstands and
+boards are generated from the layout.
+
 ## Tests
 
 ```bash
@@ -75,7 +88,8 @@ npm run test:sim
 
 Runs the vehicle physics, barrier collisions, an autopilot driving two full
 laps, the lap-validity rules and a 30 fps vs 144 fps determinism check
-headlessly in Node (no browser needed). Adding `?autopilot` to the game URL
+headlessly in Node (no browser needed). `APEX_TRACK=monte-alto npm run
+test:sim` runs them on the second circuit. Adding `?autopilot` to the game URL
 lets the same test driver lap the circuit in the browser.
 
 ## What is implemented
@@ -90,12 +104,12 @@ automatic shifting and an RPM model, mild traction control / ABS, per-wheel
 surface detection (asphalt, kerb, grass, gravel) with grip and drag
 penalties, and Rapier collision response against the barriers.
 
-Reference numbers from the test run: 0–100 km/h in 2.4 s, 0–200 in 4.5 s,
-about 300–340 km/h at the end of the main straight, roughly 4 g peak lateral.
+Reference numbers from the test run: 0–100 km/h in 1.9 s, about 300–340 km/h
+at the end of the main straight, roughly 4 g peak lateral.
 It is tuned to be fun and believable, not to be an engineering simulator.
 
-**Circuit** (`src/game/track/`) — closed spline with a 900 m start straight,
-a 28 m-radius hairpin, fast sweepers and an S-curve section. Kerbs, edge
+**Circuits** (`src/game/track/`) — closed splines, each with a long start
+straight and pit complex. Kerbs, edge
 lines, grid, gravel traps, concrete and tyre barriers, debris fencing,
 grandstands, pit lane and pit building, race-control tower, start gantry with
 working lights, sponsor boards, a bridge, braking boards, trees and hills.

@@ -11,7 +11,7 @@ generated in code at load time.
 | All textures (asphalt, grass, gravel, concrete, carbon fibre, tyres, kerbs, crowd, fences, sponsor boards, livery, clouds) | Procedural canvas textures, `src/game/gfx/textures.ts` | Part of this project |
 | All audio (engine, shifts, tyres, brakes, wind, kerbs, impacts, start beeps) | Procedural Web Audio synthesis, `src/game/audio/AudioEngine.ts` | Part of this project |
 
-The circuit ("Circuito Costa Verde"), the car, the team livery and every
+The circuits ("Circuito Costa Verde", "Autodromo Monte Alto"), the car, the team livery and every
 sponsor name on the boards (VELOX, NORDWIND, Kairos Energy, HELIX, ORBITAL,
 MERIDIAN, APEX GP) are fictional. No real team, series, circuit or brand is
 depicted.

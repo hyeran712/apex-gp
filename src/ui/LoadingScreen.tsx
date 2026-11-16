@@ -1,4 +1,5 @@
 import { useStore } from '../game/store'
+import { trackDef } from '../game/track/trackData'
 
 export function LoadingScreen() {
   const progress = useStore(s => s.loadProgress)
@@ -7,7 +8,7 @@ export function LoadingScreen() {
     <div className="loading">
       <div className="loading-inner">
         <div className="brand"><span className="brand-mark" />APEX<b>GP</b></div>
-        <div className="loading-sub">TIME TRIAL · CIRCUITO COSTA VERDE</div>
+        <div className="loading-sub">TIME TRIAL · {trackDef.name.toUpperCase()}</div>
         <div className="loading-bar" role="progressbar" aria-valuenow={Math.round(progress * 100)} aria-valuemin={0} aria-valuemax={100}>
           <div className="loading-fill" style={{ transform: `scaleX(${progress})` }} />
         </div>

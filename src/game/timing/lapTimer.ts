@@ -6,10 +6,11 @@
  * A lap only counts if every gate was crossed in order, in the forward
  * direction, and the car never left the circuit with all four wheels.
  */
-import { track } from '../track/trackData'
+import { track, trackDef } from '../track/trackData'
 
 export const NUM_CHECKPOINTS = 10
-const STORAGE_KEY = 'apex-gp:best-lap:v1'
+// One record per circuit. v2: handling was retuned, so earlier times are not comparable.
+const STORAGE_KEY = `apex-gp:best-lap:v2:${trackDef.id}`
 
 export interface LapEvent {
   type: 'lap' | 'invalidated' | 'checkpoint' | 'start'
