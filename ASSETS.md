@@ -48,10 +48,9 @@ game asset.
 
 ## About the engine sound
 
-The engine note is **synthesised**, not recorded. Three voicings are tuned to
-the firing frequencies of real Formula 1 engine eras (V10 at about 19,000 rpm,
-V8 at about 18,000 rpm, and the current V6 turbo hybrid) and are selectable in
-the menu. They follow the right pitch, load and gear-shift behaviour, but a
+The engine note is **synthesised**, not recorded. The default is the game's original note; two alternatives are
+tuned to the firing frequencies of the Formula 1 V10 (about 19,000 rpm) and
+V8 (about 18,000 rpm) eras, selectable in the menu. They follow the right pitch, load and gear-shift behaviour, but a
 synthesiser cannot reproduce the exact timbre of a real car.
 
 ### Using a real recording

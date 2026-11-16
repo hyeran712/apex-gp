@@ -28,8 +28,6 @@ interface EngineProfile {
   pulses: number
   /** pitch scale: the sim revs to 12,500 rpm, older F1 engines went far higher */
   pitch: number
-  /** 0..1 turbo / MGU whine level */
-  turbo: number
   /** five voices: frequency as a multiple of the firing frequency */
   mul: number[]
   types: OscillatorType[]
@@ -43,28 +41,27 @@ interface EngineProfile {
 }
 
 export const ENGINE_SOUNDS: Record<EngineSound, EngineProfile> = {
+  // the original engine note the game shipped with (default)
+  v6: {
+    label: 'Original', pulses: 3, pitch: 1,
+    mul: [1, 0.5, 2, 1.5, 0.25], types: ['sawtooth', 'square', 'sawtooth', 'sawtooth', 'triangle'],
+    levels: [0.5, 0.34, 0.16, 0.12, 0.3], detune: [0, 7, -9, 5, 0],
+    drive: 2.6, filter: [500, 1700, 1500, 4200], q: 1.2, gain: 1,
+  },
   // 3.0 V10 era: ten cylinders at ~19,000 rpm, a smooth wail whose
   // fundamental reaches ~1.5 kHz, with the octave and half order behind it
   v10: {
-    label: 'F1 V10', pulses: 5, pitch: 1.5, turbo: 0,
+    label: 'F1 V10', pulses: 5, pitch: 1.5,
     mul: [1, 0.5, 2, 0.2, 3], types: ['sawtooth', 'triangle', 'triangle', 'sine', 'sine'],
     levels: [0.46, 0.3, 0.2, 0.2, 0.07], detune: [0, 4, -6, 0, 3],
     drive: 1.5, filter: [700, 2400, 1800, 5600], q: 2.2, gain: 1,
   },
   // 2.4 V8 era: flat-plane crank at ~18,000 rpm, harder-edged and a little lower
   v8: {
-    label: 'F1 V8', pulses: 4, pitch: 1.44, turbo: 0,
+    label: 'F1 V8', pulses: 4, pitch: 1.44,
     mul: [1, 0.5, 2, 0.25, 1.5], types: ['sawtooth', 'sawtooth', 'triangle', 'sine', 'square'],
     levels: [0.5, 0.34, 0.16, 0.16, 0.06], detune: [0, 6, -8, 0, 4],
     drive: 2.3, filter: [600, 2000, 1600, 4800], q: 1.8, gain: 1,
-  },
-  // current 1.6 V6 turbo hybrid: lower and rougher, ~600 Hz at the limiter,
-  // muffled by the turbine, with turbo and MGU whine on top
-  v6: {
-    label: 'F1 V6 hybrid', pulses: 3, pitch: 1, turbo: 1,
-    mul: [1, 0.5, 2, 1.5, 0.25], types: ['sawtooth', 'square', 'sawtooth', 'sawtooth', 'triangle'],
-    levels: [0.5, 0.36, 0.14, 0.1, 0.3], detune: [0, 7, -9, 5, 0],
-    drive: 2.8, filter: [420, 1400, 1200, 3200], q: 1.2, gain: 1,
   },
 }
 
@@ -80,9 +77,7 @@ export class AudioEngine {
   private osc: OscillatorNode[] = []
   private oscGain: GainNode[] = []
   private shaper!: WaveShaperNode
-  private profile: EngineProfile = ENGINE_SOUNDS.v10
-  private turboOsc!: OscillatorNode
-  private turboGain!: GainNode
+  private profile: EngineProfile = ENGINE_SOUNDS.v6
   private synthGain!: GainNode
   private sample: AudioBufferSourceNode | null = null
   private engineFilter!: BiquadFilterNode
@@ -128,11 +123,6 @@ export class AudioEngine {
       this.osc.push(o); this.oscGain.push(g)
     }
     this.applyProfile()
-    // turbo / MGU-H whine (only audible on the hybrid profile)
-    this.turboOsc = ctx.createOscillator(); this.turboOsc.type = 'sine'
-    this.turboGain = ctx.createGain(); this.turboGain.gain.value = 0
-    this.turboOsc.connect(this.turboGain).connect(this.master)
-    this.turboOsc.start()
     void this.loadSample(ctx)
     shaper.connect(this.engineFilter).connect(this.engineGain).connect(this.master)
 
@@ -181,7 +171,7 @@ export class AudioEngine {
 
   /** Switch the engine note. Takes effect immediately, also while driving. */
   setEngineSound(name: EngineSound) {
-    this.profile = ENGINE_SOUNDS[name] ?? ENGINE_SOUNDS.v10
+    this.profile = ENGINE_SOUNDS[name] ?? ENGINE_SOUNDS.v6
     if (this.ctx) this.applyProfile()
   }
 
@@ -208,7 +198,7 @@ export class AudioEngine {
   silence() {
     if (!this.ctx) return
     const t = this.ctx.currentTime
-    for (const g of [this.engineGain, this.turboGain, this.intakeGain, this.skidGain, this.surfaceGain, this.windGain, this.brakeGain, this.curbGain]) {
+    for (const g of [this.engineGain, this.intakeGain, this.skidGain, this.surfaceGain, this.windGain, this.brakeGain, this.curbGain]) {
       g.gain.setTargetAtTime(0, t, 0.08)
     }
   }
@@ -252,8 +242,6 @@ export class AudioEngine {
     let eg = (0.1 + rpmN * 0.1 + load * (0.2 + rpmN * 0.2)) * p.gain
     if (s.limiter) eg *= 0.6 + 0.4 * Math.sin(t * 90)
     set(this.engineGain.gain, eg, 0.03)
-    set(this.turboOsc.frequency, 2200 + rpmN * 5200 + load * 1400, 0.25)
-    set(this.turboGain.gain, p.turbo * rpmN * (0.006 + load * 0.02), 0.2)
     set(this.intakeFilter.frequency, 900 + rpmN * 2600)
     set(this.intakeGain.gain, load * rpmN * 0.1, 0.05)
 

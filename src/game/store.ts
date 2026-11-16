@@ -9,12 +9,12 @@ export const CAMERA_NAMES = ['CHASE', 'COCKPIT', 'NOSE'] as const
 
 export interface Toast { id: number; text: string; sub?: string; tone: 'good' | 'bad' | 'info' | 'best' }
 
-interface Settings { quality: QualityName; volume: number; adaptive: boolean; engine: EngineSound }
+interface Settings { quality: QualityName; volume: number; adaptive: boolean; engineSound: EngineSound }
 const SETTINGS_KEY = 'apex-gp:settings:v1'
 
 function loadSettings(): Settings {
   // phones start on the lightest preset; it can be raised in the menu
-  const def: Settings = { quality: IS_TOUCH_DEVICE ? 'low' : 'high', volume: 0.8, adaptive: true, engine: 'v10' }
+  const def: Settings = { quality: IS_TOUCH_DEVICE ? 'low' : 'high', volume: 0.8, adaptive: true, engineSound: 'v6' }
   try {
     const raw = localStorage.getItem(SETTINGS_KEY)
     if (raw) return { ...def, ...JSON.parse(raw) }
@@ -58,8 +58,8 @@ export const useStore = create<Store>((set, get) => ({
   set: p => set(p),
   setSetting: p => {
     set(p)
-    const { quality, volume, adaptive, engine } = get()
-    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ quality, volume, adaptive, engine })) } catch { /* ignore */ }
+    const { quality, volume, adaptive, engineSound } = get()
+    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ quality, volume, adaptive, engineSound })) } catch { /* ignore */ }
   },
   showToast: t => set({ toast: { ...t, id: ++toastId } }),
 }))

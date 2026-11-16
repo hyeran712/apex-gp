@@ -138,7 +138,7 @@ tone mapping, MSAA / SMAA, ambient occlusion (N8AO), bloom, vignette and a
 speed-dependent radial blur.
 
 **Audio** (`src/game/audio/AudioEngine.ts`) — fully synthesised: three
-selectable engine voicings (F1 V10, V8 and V6 hybrid eras) tied to RPM and
+selectable engine voicings (the original note, plus F1 V10 and V8 eras) tied to RPM and
 throttle, with a slot for a recorded loop (see ASSETS.md), shift cut and overrun pops, tyre scrub,
 brake hiss, kerb rumble, grass/gravel noise, wind and impacts.
 

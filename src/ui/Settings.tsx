@@ -9,7 +9,7 @@ export function Settings() {
   const quality = useStore(s => s.quality)
   const adaptive = useStore(s => s.adaptive)
   const volume = useStore(s => s.volume)
-  const engine = useStore(s => s.engine)
+  const engine = useStore(s => s.engineSound)
   const setSetting = useStore(s => s.setSetting)
   const q = resolveQuality(quality, IS_TOUCH_DEVICE)
   return (
@@ -36,7 +36,7 @@ export function Settings() {
         <div className="segmented three" role="radiogroup" aria-label="Engine sound">
           {(Object.keys(ENGINE_SOUNDS) as EngineSound[]).map(name => (
             <button key={name} role="radio" aria-checked={engine === name} className={engine === name ? 'on' : ''}
-              onClick={() => { setSetting({ engine: name }); game.audio.setEngineSound(name) }}>{ENGINE_SOUNDS[name].label}</button>
+              onClick={() => { setSetting({ engineSound: name }); game.audio.setEngineSound(name) }}>{ENGINE_SOUNDS[name].label}</button>
           ))}
         </div>
       </div>
