@@ -6,6 +6,7 @@ import { formatTime } from '../game/timing/lapTimer'
 import { track } from '../game/track/trackData'
 import { shouldBrake } from '../game/vehicle/autopilot'
 import { CAR } from '../game/vehicle/vehiclePhysics'
+import { NameTags, Tower } from './Race'
 
 const LEDS = 15
 
@@ -36,6 +37,7 @@ export function HUD() {
   const phase = useStore(s => s.phase)
   const toast = useStore(s => s.toast)
   const quality = useStore(s => s.quality)
+  const isRace = useStore(s => s.mode === 'race') && !!game.race
   const [shownToast, setShownToast] = useState(toast)
   const map = useMiniMap()
   const r = useRef<Record<string, HTMLElement | SVGElement | null>>({})
@@ -68,7 +70,8 @@ export function HUD() {
       ;(r.current.brk as HTMLElement).style.transform = `scaleY(${s.brake})`
       ;(r.current.steer as HTMLElement).style.transform = `translateX(${s.steerInput * 46}px)`
 
-      text('lap', t.lap === 0 ? 'OUT' : String(t.lap).padStart(2, '0'))
+      const race = game.race
+      text('lap', race ? `${race.lapOf(race.playerD)}/${race.laps}` : t.lap === 0 ? 'OUT' : String(t.lap).padStart(2, '0'))
       text('time', t.lap === 0 ? formatTime(0) : formatTime(t.lapTime))
       ;(r.current.time as HTMLElement).classList.toggle('invalid', !t.valid)
       text('last', formatTime(t.lastLap))
@@ -84,7 +87,7 @@ export function HUD() {
       const prog = s.loc.s / track.length
       text('prog', `${Math.floor(prog * 100)}%`)
       ;(r.current.progFill as HTMLElement).style.transform = `scaleX(${prog})`
-      text('sector', `CP ${t.nextCheckpoint === 0 ? 10 : t.nextCheckpoint - 1}/10`)
+      text('sector', race ? `P${race.playerPosition(s.speed)}/${race.total}` : `CP ${t.nextCheckpoint === 0 ? 10 : t.nextCheckpoint - 1}/10`)
       ;(r.current.dot as SVGElement).setAttribute('transform', `translate(${map.px(game.pose.x).toFixed(1)} ${map.pz(game.pose.z).toFixed(1)})`)
 
       // warnings
@@ -110,6 +113,8 @@ export function HUD() {
 
   return (
     <div className="hud">
+      {isRace && <Tower />}
+      {isRace && <NameTags />}
       <div className="panel timing">
         <div className="timing-head"><span className="tag">LAP</span><b ref={bind('lap')}>OUT</b><span className="sector" ref={bind('sector')} /></div>
         <div className="time mono" ref={bind('time')}>0:00.000</div>

@@ -5,6 +5,7 @@ import { HUD } from './ui/HUD'
 import { LoadingScreen } from './ui/LoadingScreen'
 import { MainMenu } from './ui/MainMenu'
 import { PauseMenu } from './ui/PauseMenu'
+import { Results } from './ui/Race'
 import { RotateHint, TouchControls } from './ui/TouchControls'
 
 /** Keeps a CSS scale factor in sync with the viewport so the HUD fits any screen. */
@@ -42,7 +43,7 @@ export function App() {
   const phase = useStore(s => s.phase)
   const touch = useStore(s => s.touch)
   const portrait = useViewport()
-  const inSession = phase === 'racing' || phase === 'countdown' || phase === 'paused'
+  const inSession = phase === 'racing' || phase === 'countdown' || phase === 'paused' || phase === 'finished'
   return (
     <div className={`app${touch ? ' touch' : ''}`}>
       <Scene />
@@ -50,6 +51,7 @@ export function App() {
       {touch && (phase === 'racing' || phase === 'countdown') && <TouchControls />}
       {phase === 'menu' && <MainMenu />}
       {phase === 'paused' && <PauseMenu />}
+      {phase === 'finished' && <Results />}
       {phase === 'loading' && <LoadingScreen />}
       {touch && portrait && phase !== 'loading' && <RotateHint />}
     </div>

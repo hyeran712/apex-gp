@@ -9,8 +9,8 @@
 import { track, trackDef } from '../track/trackData'
 
 export const NUM_CHECKPOINTS = 10
-// One record per circuit. v2: handling was retuned, so earlier times are not comparable.
-const STORAGE_KEY = `apex-gp:best-lap:v2:${trackDef.id}`
+// One record per circuit. v3: elevation changed lap times; v2: handling was retuned, so earlier times are not comparable.
+const STORAGE_KEY = `apex-gp:best-lap:v3:${trackDef.id}`
 
 export interface LapEvent {
   type: 'lap' | 'invalidated' | 'checkpoint' | 'start'

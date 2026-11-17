@@ -18,6 +18,7 @@ export function mulberry32(seed: number) {
 
 /** Tileable value noise on a size x size grid with `cells` lattice cells. */
 function tileNoise(size: number, cells: number, seed: number): Float32Array {
+  cells = Math.max(1, Math.round(cells)) // fractional lattices produced NaN (black) textures
   const rnd = mulberry32(seed)
   const lattice = new Float32Array(cells * cells)
   for (let i = 0; i < lattice.length; i++) lattice[i] = rnd()
@@ -150,10 +151,10 @@ export function makeGravel(size = 512): PBRSet {
     size, h,
     (hv, i) => {
       const v = 0.62 + hv * 0.5 + macro[i] * 0.16
-      return [176 * v, 163 * v, 140 * v]
+      return [196 * v, 180 * v, 150 * v]
     },
     () => 0.96,
-    5,
+    1.1,
   )
 }
 

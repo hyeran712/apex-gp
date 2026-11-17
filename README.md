@@ -1,7 +1,8 @@
 # APEX GP — Time Trial
 
 A single-player, browser-based Formula-style time-trial game: one car, three
-fictional circuits, one mode. Built with
+fictional circuits, and two modes: a solo time trial and a race against
+computer-driven cars. Built with
 React, Vite, TypeScript, Three.js / React Three Fiber, Rapier and the Web
 Audio API. No installation is needed to play the built version.
 
@@ -66,6 +67,28 @@ The build uses relative URLs, so it can be hosted from any path.
 - **Any static host (Netlify, Vercel, S3, nginx):** upload the contents of
   `dist/`.
 - **Local check of the built files:** `npm run preview`.
+
+## Race mode
+
+Choose **Race** in the menu, then 3, 5 or 10 laps and a difficulty. You start
+6th on a staggered grid of 8 cars (6 on phones) and race to the flag; the
+standings tower on the left shows positions and gaps, name tags float above
+the opponents, and a results screen ranks everyone when you finish.
+
+The opponents are fictional drivers in their own liveries. They do not use the
+full tyre model: each follows the circuit at a speed taken from a corner and
+braking profile scaled by a per-driver pace, steers around slower cars, and is
+a solid body you can collide with (you bounce off them, they are not pushed).
+Easy, Normal and Hard scale their pace; the field is also nudged slightly
+faster when it falls behind you and slower when it runs away, so races stay
+close. **Hard** is about the pace of the test pilot used by `npm run test:sim`.
+
+## Elevation
+
+All three circuits have hills: gradients up to about 5 %, and the ground, kerbs,
+barriers, grandstands and trees follow the road. Climbs cost acceleration,
+descents add it, and over crests and through compressions the grip changes a
+little. The pit straight is always level.
 
 ## Circuits
 
@@ -158,7 +181,10 @@ and HUD telemetry is written straight to the DOM without React re-renders.
 - Scenery and textures are also procedural. The result is a clean,
   consistent, physically lit look, but it is not AAA-level photorealism;
   that would need scanned textures and authored models.
-- The circuit has no elevation change.
+- Elevation is a function of distance along the lap only: there is no banking or
+  camber, and the road is level across its width.
+- Opponents use a simplified model, not the player's tyre physics, and have no
+  engine sound.
 - The pit lane is scenery only; it cannot be driven into.
 - Frame rate on real GPUs was not measured: development and testing ran in a
   headless browser with software rendering, which verifies correctness but
@@ -189,6 +215,7 @@ apex-gp/
    │  ├─ Scene.tsx           canvas, asset loading, lighting, sky
    │  ├─ track/              trackData.ts (layout, surfaces), trackScene.ts (visuals)
    │  ├─ vehicle/            vehiclePhysics.ts, proceduralCar.ts, carLoader.ts, autopilot.ts
+   │  ├─ race/               ai.ts (opponents), race.ts (grid, standings), drivers.ts
    │  ├─ timing/lapTimer.ts
    │  ├─ camera/CameraRig.tsx
    │  ├─ audio/AudioEngine.ts

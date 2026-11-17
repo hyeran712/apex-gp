@@ -63,7 +63,9 @@ export function autopilot(s: VehicleState, out: VehicleInput): VehicleInput {
 
   const vTarget = targetSpeed(s)
   const err = vTarget - s.speed
-  out.throttle = err > 0 ? 1 : 0
+  // feed the power in as the steering unwinds, like a driver would on corner exit
+  const unwound = 1 - 0.65 * Math.max(0, Math.min(1, (Math.abs(out.steer) - 0.45) / 0.55))
+  out.throttle = err > 0 ? unwound : 0
   out.brake = err < -1.5 ? 1 : 0
   out.hardBrake = false
   return out

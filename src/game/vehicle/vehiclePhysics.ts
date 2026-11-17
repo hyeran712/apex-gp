@@ -10,7 +10,7 @@
  */
 import RAPIER from '@dimforge/rapier3d-compat'
 import {
-  locate, poseAt, surfaceAt, track, type Surface, type TrackLocation,
+  heightAt, locate, poseAt, surfaceAt, track, type Surface, type TrackLocation,
 } from '../track/trackData'
 
 export const FIXED_DT = 1 / 120
@@ -68,6 +68,10 @@ export interface VehicleState {
   x: number
   z: number
   yaw: number
+  /** road height under the car, and its attitude on the gradient (radians) */
+  y: number
+  pitch: number
+  roll: number
   /** forward speed m/s (negative in reverse) */
   vx: number
   /** lateral speed m/s (right positive) */
@@ -127,8 +131,9 @@ export class VehicleSim {
   world: RAPIER.World
   body: RAPIER.RigidBody
   state: VehicleState
+  private kinematics: RAPIER.RigidBody[] = []
   /** previous fixed-step pose, for render interpolation */
-  prev = { x: 0, z: 0, yaw: 0 }
+  prev = { x: 0, z: 0, yaw: 0, y: 0 }
   private accumulator = 0
   private shiftTimer = 0
   private shiftCooldown = 0
@@ -191,7 +196,7 @@ export class VehicleSim {
     )
 
     this.state = {
-      x: 0, z: 0, yaw: 0, vx: 0, vy: 0, yawRight: 0, speed: 0,
+      x: 0, z: 0, yaw: 0, y: 0, pitch: 0, roll: 0, vx: 0, vy: 0, yawRight: 0, speed: 0,
       gear: 1, rpm: CAR.idle, throttle: 0, brake: 0,
       steerAngle: 0, steerInput: 0, wheelRot: 0,
       slipFront: 0, slipRear: 0, wheelspin: 0, lockup: 0, gLong: 0, gLat: 0,
@@ -200,6 +205,22 @@ export class VehicleSim {
       shiftCount: 0, shiftUp: true, impactCount: 0, impactStrength: 0, limiter: false,
     }
     this.placeOnGrid()
+  }
+
+  /** A body the player can collide with, moved by the caller (an AI opponent). */
+  addKinematicCar(): RAPIER.RigidBody {
+    const body = this.world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(0, -50, 0))
+    this.world.createCollider(
+      RAPIER.ColliderDesc.cuboid(CAR.halfLength, 0.5, CAR.halfWidth).setTranslation(0.15, 0.5, 0).setFriction(0.25).setRestitution(0.12),
+      body,
+    )
+    this.kinematics.push(body)
+    return body
+  }
+
+  clearKinematics() {
+    for (const b of this.kinematics) this.world.removeRigidBody(b)
+    this.kinematics.length = 0
   }
 
   /** Grid slot a little before the start/finish line. */
@@ -233,6 +254,8 @@ export class VehicleSim {
     this.accumulator = 0
     this.prev.x = p.x; this.prev.z = p.z; this.prev.yaw = p.yaw
     locate(p.x, p.z, -1, s.loc)
+    this.updateGround()
+    this.prev.y = s.y
   }
 
   /**
@@ -257,7 +280,7 @@ export class VehicleSim {
     const s = this.state
     const body = this.body
 
-    this.prev.x = s.x; this.prev.z = s.z; this.prev.yaw = s.yaw
+    this.prev.x = s.x; this.prev.z = s.z; this.prev.yaw = s.yaw; this.prev.y = s.y
 
     // --- body state -> car frame -------------------------------------------
     const lin = body.linvel()
@@ -313,7 +336,17 @@ export class VehicleSim {
     const v2 = speed * speed
     const downforce = 0.5 * RHO * CAR.liftArea * v2
     const transfer = (CAR.mass * this.axSmoothed * CAR.cgHeight) / CAR.wheelbase
-    const weight = CAR.mass * G
+    // gradient and crests: the road only varies along the lap, so project it on the car
+    const road = track.samples[s.loc.index]
+    const alignF = fx * road.tx + fz * road.tz
+    const alignR = rx * road.tx + rz * road.tz
+    const slopeF = road.dy * alignF
+    const slopeR = road.dy * alignR
+    // vertical curvature: compressions add load, crests take it away
+    const vAlong = vx * alignF + vy * alignR
+    // (kept deliberately mild: half the physical effect, capped at -12% / +20%)
+    const crest = Math.max(0.88, Math.min(1.2, 1 + (0.5 * vAlong * vAlong * road.ddy) / G))
+    const weight = CAR.mass * G * crest
     const fzF = Math.max(300, (weight * CAR.cgToRear) / CAR.wheelbase + downforce * CAR.aeroFront - transfer)
     const fzR = Math.max(300, (weight * CAR.cgToFront) / CAR.wheelbase + downforce * (1 - CAR.aeroFront) + transfer)
     const capF = grip[0] * fzF
@@ -429,8 +462,9 @@ export class VehicleSim {
     const rvy = speed > 0.05 ? (-vy / speed) * resist : 0
 
     // --- sum in car frame ---------------------------------------------------
-    let Fx = FxR + FxF * cd - FyF * sd + rvx
-    let Fy = FyR + FyF * cd + FxF * sd + rvy
+    const gravity = CAR.mass * G
+    let Fx = FxR + FxF * cd - FyF * sd + rvx - gravity * slopeF
+    let Fy = FyR + FyF * cd + FxF * sd + rvy - gravity * slopeR
     let Mz = CAR.cgToFront * (FyF * cd + FxF * sd) - CAR.cgToRear * FyR
 
     // hold still when parked
@@ -488,6 +522,17 @@ export class VehicleSim {
     s.slipRear += (Math.min(1, sr) - s.slipRear) * Math.min(1, dt * 12)
 
     locate(s.x, s.z, s.loc.index, s.loc)
+    this.updateGround()
+  }
+
+  /** Height and attitude of the car on the road at its current location. */
+  private updateGround() {
+    const s = this.state
+    const road = track.samples[s.loc.index]
+    const fx = Math.cos(s.yaw), fz = -Math.sin(s.yaw)
+    s.y = heightAt(s.loc)
+    s.pitch = Math.atan(road.dy * (fx * road.tx + fz * road.tz))
+    s.roll = Math.atan(road.dy * (-fz * road.tx + fx * road.tz))
   }
 
   private shift(up: boolean) {

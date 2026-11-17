@@ -21,7 +21,7 @@ export interface QualitySettings {
 
 export const QUALITY: Record<QualityName, QualitySettings> = {
   low: {
-    label: 'Low', dpr: [0.6, 1], shadows: false, shadowMapSize: 1024, post: false, msaa: 0,
+    label: 'Low', dpr: [0.6, 1], shadows: true, shadowMapSize: 1024, post: false, msaa: 0,
     ao: false, aoHalfRes: true, bloom: false, motionBlur: false, anisotropy: 2, detail: 0.35, clouds: false,
   },
   medium: {

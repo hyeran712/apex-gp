@@ -14,7 +14,7 @@ import {
 } from './trackData'
 import {
   makeAdStrip, makeAsphalt, makeBillboard, makeChequer, makeConcrete, makeCrowd, makeCurb, makeDecal, makeFence,
-  makeGarage, makeGrass, makeGravel, makeTyreWall, mulberry32,
+  makeBlob, makeGarage, makeGrass, makeGravel, makeTyreWall, mulberry32,
 } from '../gfx/textures'
 
 const { samples, count, length: LAP } = track
@@ -60,7 +60,7 @@ function ribbon(o: {
     for (let k = 0; k <= cols; k++) {
       const t = k / cols
       const d = a + (b - a) * t
-      pos.push(c.x - c.tz * d, (o.y0 ?? 0) + ((o.y1 ?? o.y0 ?? 0) - (o.y0 ?? 0)) * t, c.z + c.tx * d)
+      pos.push(c.x - c.tz * d, c.y + (o.y0 ?? 0) + ((o.y1 ?? o.y0 ?? 0) - (o.y0 ?? 0)) * t, c.z + c.tx * d)
       uv.push(d * (o.uScale ?? 1), s * (o.vScale ?? 1))
       if (o.color) { const v = o.color(c, i % count, d); col.push(v, v, v) }
     }
@@ -91,7 +91,7 @@ function wallStrip(o: {
     const s = i === count ? LAP : c.s
     const d = o.d(c, i % count)
     const x = c.x - c.tz * d, z = c.z + c.tx * d
-    pos.push(x, o.y0, z, x, o.y1, z)
+    pos.push(x, c.y + o.y0, z, x, c.y + o.y1, z)
     uv.push(s * o.uScale, 0, s * o.uScale, (o.y1 - o.y0) * (o.vScale ?? 1 / (o.y1 - o.y0)))
     // face the circuit
     nor.push(c.tz * o.side, 0, -c.tx * o.side, c.tz * o.side, 0, -c.tx * o.side)
@@ -130,6 +130,7 @@ const FIELD = (() => {
   const nx = Math.ceil((maxX - minX) / cell) + 1, nz = Math.ceil((maxZ - minZ) / cell) + 1
   const dist = new Float32Array(nx * nz)
   const inside = new Uint8Array(nx * nz)
+  const height = new Float32Array(nx * nz)
   const poly: TrackSample[] = []
   for (let i = 0; i < count; i += 6) poly.push(samples[i])
   for (let iz = 0; iz < nz; iz++) {
@@ -137,12 +138,18 @@ const FIELD = (() => {
     for (let ix = 0; ix < nx; ix++) {
       const x = minX + ix * cell
       let best = Infinity
+      // road height spread over the landscape: inverse-distance weighting, so
+      // it equals the road beside the track and blends smoothly between sections
+      let wSum = 0, hSum = 0
       for (let k = 0; k < poly.length; k++) {
         const dx = poly[k].x - x, dz = poly[k].z - z
         const d = dx * dx + dz * dz
         if (d < best) best = d
+        const w = 1 / ((d + 30) * (d + 30))
+        wSum += w; hSum += w * poly[k].y
       }
       dist[iz * nx + ix] = Math.sqrt(best)
+      height[iz * nx + ix] = hSum / wSum
       let inp = false
       for (let k = 0, j = poly.length - 1; k < poly.length; j = k++) {
         const a = poly[k], b = poly[j]
@@ -157,20 +164,83 @@ const FIELD = (() => {
     const ix = Math.floor(fx), iz = Math.floor(fz), tx = fx - ix, tz = fz - iz
     const i = iz * nx + ix
     const d = dist[i] * (1 - tx) * (1 - tz) + dist[i + 1] * tx * (1 - tz) + dist[i + nx] * (1 - tx) * tz + dist[i + nx + 1] * tx * tz
-    return { d, inside: inside[i] === 1 }
+    const h = height[i] * (1 - tx) * (1 - tz) + height[i + 1] * tx * (1 - tz) + height[i + nx] * (1 - tx) * tz + height[i + nx + 1] * tx * tz
+    return { d, inside: inside[i] === 1, h }
   }
   return { sample }
 })()
 
-/** Gentle hills that rise away from the circuit; the infield stays flat. */
+const sstep = (a: number, b: number, v: number) => { const t = Math.max(0, Math.min(1, (v - a) / (b - a))); return t * t * (3 - 2 * t) }
+
+/**
+ * Landscape height. It follows the road's elevation everywhere, adds hills
+ * away from the circuit, and sits slightly below road level next to the track
+ * (the verge strip built from the track data covers that gap exactly).
+ */
 export function terrainHeight(x: number, z: number): number {
   const f = FIELD.sample(x, z)
-  if (f.inside) return 0
-  const t = Math.max(0, Math.min(1, (f.d - 70) / 520))
-  const rise = t * t * (3 - 2 * t)
-  // small undulations only start well behind the barriers, so runoff areas stay flat
-  const u = Math.max(0, Math.min(1, (f.d - 58) / 160))
-  return rise * (10 + 95 * fbm2(x * 0.0016 + 3.1, z * 0.0016 + 7.7)) + u * u * 2.5 * (noise2(x * 0.012, z * 0.012) - 0.5)
+  let hills = 0
+  if (!f.inside) {
+    const rise = sstep(70, 590, f.d)
+    // small undulations only start well behind the barriers
+    const u = Math.max(0, Math.min(1, (f.d - 58) / 160))
+    hills = rise * (10 + 95 * fbm2(x * 0.0016 + 3.1, z * 0.0016 + 7.7)) + u * u * 2.5 * (noise2(x * 0.012, z * 0.012) - 0.5)
+  }
+  // the pit complex and paddock are level ground at road height
+  const paddock = (1 - sstep(PIT.after + 60, PIT.after + 110, Math.abs(x - (PIT.after - PIT.before) / 2) - (PIT.after + PIT.before) / 2 + PIT.after + 60))
+    * (1 - sstep(95, 130, z)) * sstep(-70, -40, z)
+  const sink = 0.9 * (1 - sstep(70, 115, f.d)) * (1 - paddock)
+  return f.h + hills - sink
+}
+
+function grassTint(x: number, z: number, h: number): [number, number, number] {
+  const n = fbm2(x * 0.006 + 11, z * 0.006 + 5)
+  const dry = fbm2(x * 0.02, z * 0.02)
+  const hill = Math.max(0, Math.min(1, h / 90))
+  // lush near the track, drier and bluer with altitude
+  return [0.78 + n * 0.5 + dry * 0.16 - hill * 0.1, 0.82 + n * 0.36 - hill * 0.12, 0.72 + n * 0.3 + hill * 0.1]
+}
+
+/**
+ * Grass strip that carries the ground at road height from the track out past
+ * the barriers, then folds down into the landscape. Same colouring and UVs as
+ * the terrain so the two read as one surface.
+ */
+function vergeGeometry(): BufferGeometry {
+  const pos: number[] = [], uv: number[] = [], col: number[] = [], idx: number[] = []
+  const cols = 6
+  for (let i = 0; i <= count; i++) {
+    const c = samples[i % count]
+    const radius = 1 / Math.max(1e-6, Math.abs(c.k))
+    const reach = (wall: number, inner: boolean) => {
+      const flat = wall + 5
+      const outer = inner ? Math.min(wall + 22, Math.max(wall + 7, radius * 0.85)) : wall + 22
+      return [Math.min(flat, outer - 1.5), outer]
+    }
+    const [flatL, outL] = reach(c.wallL, c.k < -0.002)
+    const [flatR, outR] = reach(c.wallR, c.k > 0.002)
+    const ds = [-outL, -flatL, -TRACK_HALF_WIDTH, 0, TRACK_HALF_WIDTH, flatR, outR]
+    ds.forEach((d, k) => {
+      const x = c.x - c.tz * d, z = c.z + c.tx * d
+      const edge = k === 0 || k === cols
+      const y = edge ? terrainHeight(x, z) - 0.45 : c.y - 0.03
+      pos.push(x, y, z)
+      uv.push(x / 3800, z / 3400)
+      col.push(...grassTint(x, z, y))
+    })
+  }
+  const row = cols + 1
+  for (let i = 0; i < count; i++) for (let k = 0; k < cols; k++) {
+    const a = i * row + k, b = a + 1, c2 = a + row, d = c2 + 1
+    idx.push(a, b, c2, b, d, c2)
+  }
+  const g = new BufferGeometry()
+  g.setAttribute('position', new BufferAttribute(new Float32Array(pos), 3))
+  g.setAttribute('uv', new BufferAttribute(new Float32Array(uv), 2))
+  g.setAttribute('color', new BufferAttribute(new Float32Array(col), 3))
+  g.setIndex(idx)
+  g.computeVertexNormals()
+  return g
 }
 
 function place(g: BufferGeometry, x: number, y: number, z: number, ry = 0): BufferGeometry {
@@ -193,7 +263,7 @@ function sidePose(index: number, side: number, extra: number) {
   const d = (side < 0 ? c.wallL : c.wallR) + extra
   const x = c.x - c.tz * side * d, z = c.z + c.tx * side * d
   const yaw = Math.atan2(-c.tz, c.tx) + (side < 0 ? Math.PI : 0)
-  return { x, z, yaw, y: Math.max(0, terrainHeight(x, z)) }
+  return { x, z, yaw, y: c.y }
 }
 
 const indexAtS = (s: number) => Math.round((((s % LAP) + LAP) % LAP) / LAP * count) % count
@@ -261,8 +331,10 @@ export function buildTrackScene(opts: TrackSceneOptions): TrackScene {
   ;[grassT.map, grassT.normalMap, grassT.roughnessMap].forEach(t => tex(t, 420, 420))
   const grass = mat(new MeshStandardMaterial({
     map: grassT.map, normalMap: grassT.normalMap, roughness: 0.95, vertexColors: true, envMapIntensity: 0.5,
-    polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 2,
+    polygonOffset: true, polygonOffsetFactor: 4, polygonOffsetUnits: 4,
   }))
+  const vergeMat = mat(grass.clone())
+  vergeMat.polygonOffsetFactor = 2; vergeMat.polygonOffsetUnits = 2
   const gravelT = makeGravel()
   ;[gravelT.map, gravelT.normalMap, gravelT.roughnessMap].forEach(t => tex(t))
   const gravel = mat(new MeshStandardMaterial({
@@ -306,19 +378,15 @@ export function buildTrackScene(opts: TrackSceneOptions): TrackScene {
       const x = p.getX(i), z = p.getZ(i)
       const h = terrainHeight(x, z)
       p.setY(i, h - 0.04)
-      const n = fbm2(x * 0.006 + 11, z * 0.006 + 5)
-      const dry = fbm2(x * 0.02, z * 0.02)
-      const hill = Math.min(1, h / 90)
-      // lush near the track, drier and bluer with altitude
-      colors[i * 3] = 0.78 + n * 0.5 + dry * 0.16 - hill * 0.1
-      colors[i * 3 + 1] = 0.82 + n * 0.36 - hill * 0.12
-      colors[i * 3 + 2] = 0.72 + n * 0.3 + hill * 0.1
+      colors.set(grassTint(x, z, h), i * 3)
       uvs.setXY(i, x / 3800, z / 3400)
     }
     g.setAttribute('color', new BufferAttribute(colors, 3))
     g.computeVertexNormals()
     add(g, grass, 'receive')
   }
+
+  add(vergeGeometry(), vergeMat, 'receive')
 
   // --- racing surface ---------------------------------------------------------
   add(ribbon({
@@ -392,7 +460,7 @@ export function buildTrackScene(opts: TrackSceneOptions): TrackScene {
       const c = samples[i]
       if (!fenced(c, i)) continue
       const dd = d(c) + side * 0.25
-      m.makeTranslation(c.x - c.tz * dd, 2.35, c.z + c.tx * dd)
+      m.makeTranslation(c.x - c.tz * dd, c.y + 2.35, c.z + c.tx * dd)
       posts.push(m.clone())
     }
     const postMesh = new InstancedMesh(new CylinderGeometry(0.05, 0.05, 2.9, 6), steel, posts.length)
@@ -506,7 +574,7 @@ export function buildTrackScene(opts: TrackSceneOptions): TrackScene {
     const q = new Quaternion(), mtx = new Matrix4(), one = new Vector3(1, 1, 1), up = new Vector3(0, 1, 0)
     for (const [idx, side] of stands) {
       const p = sidePose(idx, side, 5)
-      mtx.compose(new Vector3(p.x, 0, p.z), q.setFromAxisAngle(up, p.yaw), one)
+      mtx.compose(new Vector3(p.x, p.y, p.z), q.setFromAxisAngle(up, p.yaw), one)
       const rise = 8.4, run = 13, slope = Math.hypot(rise, run)
       const s = new PlaneGeometry(L, slope)
       s.rotateX(-Math.PI / 2 - Math.atan2(rise, run))
@@ -514,6 +582,7 @@ export function buildTrackScene(opts: TrackSceneOptions): TrackScene {
       seat.push(s.applyMatrix4(mtx))
       const parts = [
         place(new BoxGeometry(L, 1.6, 0.3), 0, 0.8, 1),
+        place(new BoxGeometry(L + 0.4, 4, 14.5), 0, -2, 7.6), // foundation: the ground falls away behind the barrier
         place(new BoxGeometry(L, 10.4, 0.4), 0, 5.2, 14.3),
         place(new BoxGeometry(0.4, 1.6 + rise / 2, run), -L / 2, (1.6 + rise / 2) / 2, 1 + run / 2),
         place(new BoxGeometry(0.4, 1.6 + rise / 2, run), L / 2, (1.6 + rise / 2) / 2, 1 + run / 2),
@@ -553,25 +622,25 @@ export function buildTrackScene(opts: TrackSceneOptions): TrackScene {
       const face = new PlaneGeometry(15, 5.4); face.rotateY(Math.PI)
       add(place(face, 0, 5.6, 0).rotateY(p.yaw).translate(p.x, p.y, p.z), mat(new MeshStandardMaterial({ map: bt, roughness: 0.5 })), 'none')
       legs.push(place(new BoxGeometry(15.3, 5.7, 0.2), 0, 5.6, 0.12).rotateY(p.yaw).translate(p.x, p.y, p.z))
-      for (const lx of [-5.5, 5.5]) legs.push(place(new BoxGeometry(0.3, 6, 0.3), lx, 0, 0.3).rotateY(p.yaw).translate(p.x, p.y, p.z))
+      for (const lx of [-5.5, 5.5]) legs.push(place(new BoxGeometry(0.3, 10, 0.3), lx, -2, 0.3).rotateY(p.yaw).translate(p.x, p.y, p.z))
     })
     // sponsor bridge over the back section
     const bi = indexAtS(bridgeS), c = samples[bi]
     const wl = c.wallL + 1.2, wr = c.wallR + 1.2, yaw = Math.atan2(-c.tz, c.tx)
     const bridge: BufferGeometry[] = [
-      place(new BoxGeometry(0.7, 8, 0.7), 0, 4, -wl), place(new BoxGeometry(0.7, 8, 0.7), 0, 4, wr),
+      place(new BoxGeometry(0.7, 11, 0.7), 0, 2.5, -wl), place(new BoxGeometry(0.7, 11, 0.7), 0, 2.5, wr),
       place(new BoxGeometry(1.6, 0.3, wl + wr + 1.4), 0, 6.2, (wr - wl) / 2),
     ]
-    for (const g of bridge) legs.push(g.rotateY(yaw).translate(c.x, 0, c.z))
+    for (const g of bridge) legs.push(g.rotateY(yaw).translate(c.x, c.y, c.z))
     const bt = makeDecal('APEX GP  ·  VELOX  ·  APEX GP', '#ffffff', { w: 2048, h: 128 }); textures.push(bt)
     const bannerBg = mat(new MeshStandardMaterial({ color: '#b71d22', roughness: 0.5 }))
     const bannerTx = mat(new MeshBasicMaterial({ map: bt, transparent: true, polygonOffset: true, polygonOffsetFactor: -2 }))
     for (const dir of [-1, 1]) {
       const bg = new PlaneGeometry(wl + wr, 2); bg.rotateY(dir * Math.PI / 2)
-      const g = place(bg, dir * 0.82, 7.3, (wr - wl) / 2).rotateY(yaw).translate(c.x, 0, c.z)
+      const g = place(bg, dir * 0.82, 7.3, (wr - wl) / 2).rotateY(yaw).translate(c.x, c.y, c.z)
       add(g, bannerBg, 'none'); add(g.clone().translate(0, 0.001, 0), bannerTx, 'none', 1)
     }
-    legs.push(place(new BoxGeometry(1.6, 2.1, wl + wr), 0, 7.3, (wr - wl) / 2).rotateY(yaw).translate(c.x, 0, c.z))
+    legs.push(place(new BoxGeometry(1.6, 2.1, wl + wr), 0, 7.3, (wr - wl) / 2).rotateY(yaw).translate(c.x, c.y, c.z))
     add(merged(legs), darkSteel, 'both')
 
     // braking distance boards before the hairpin (left side)
@@ -583,9 +652,9 @@ export function buildTrackScene(opts: TrackSceneOptions): TrackScene {
       const yawB = Math.atan2(-cs.tz, cs.tx)
       const face = new PlaneGeometry(1.5, 0.75); face.rotateY(-Math.PI / 2)
       const pos = [cs.x - cs.tz * d, cs.z + cs.tx * d]
-      const bg = place(new BoxGeometry(0.06, 0.8, 1.55), 0.04, 0.95, 0).rotateY(yawB).translate(pos[0], 0, pos[1])
+      const bg = place(new BoxGeometry(0.06, 0.8, 1.55), 0.04, 0.95, 0).rotateY(yawB).translate(pos[0], cs.y, pos[1])
       add(bg, whitePanel, 'cast')
-      add(place(face, 0, 0.95, 0).rotateY(yawB).translate(pos[0], 0, pos[1]), mat(new MeshBasicMaterial({ map: t, transparent: true })), 'none', 1)
+      add(place(face, 0, 0.95, 0).rotateY(yawB).translate(pos[0], cs.y, pos[1]), mat(new MeshBasicMaterial({ map: t, transparent: true })), 'none', 1)
     })
   }
 
@@ -617,6 +686,13 @@ export function buildTrackScene(opts: TrackSceneOptions): TrackScene {
     const trunkMat = mat(new MeshStandardMaterial({ color: '#3d2f24', roughness: 0.95 }))
     const crowns = new InstancedMesh(crown, crownMat, want)
     const trunks = new InstancedMesh(trunk, trunkMat, want)
+    const disc = new PlaneGeometry(2, 2); disc.rotateX(-Math.PI / 2)
+    const blobT = makeBlob(); textures.push(blobT)
+    const shadows = new InstancedMesh(disc, mat(new MeshBasicMaterial({
+      map: blobT, color: '#000000', transparent: true, opacity: 0.5, depthWrite: false,
+      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+    })), want)
+    const sh = new Object3D(), nrm = new Vector3(), upY = new Vector3(0, 1, 0)
     const o = new Object3D(), col = new Color()
     let n = 0, guard = 0
     while (n < want && guard++ < want * 40) {
@@ -631,19 +707,28 @@ export function buildTrackScene(opts: TrackSceneOptions): TrackScene {
       o.scale.set(sc * (0.8 + rnd() * 0.4), sc * (0.85 + rnd() * 0.5), sc * (0.8 + rnd() * 0.4))
       o.updateMatrix()
       crowns.setMatrixAt(n, o.matrix); trunks.setMatrixAt(n, o.matrix)
+      // soft contact shadow lying on the slope under the canopy
+      const e = 3
+      nrm.set(terrainHeight(x - e, z) - terrainHeight(x + e, z), 2 * e, terrainHeight(x, z - e) - terrainHeight(x, z + e)).normalize()
+      sh.position.set(x, o.position.y + 0.32, z)
+      sh.quaternion.setFromUnitVectors(upY, nrm)
+      sh.scale.setScalar(sc * 1.25)
+      sh.updateMatrix()
+      shadows.setMatrixAt(n, sh.matrix)
       const v = 0.75 + rnd() * 0.4
       col.setRGB(0.13 * v + rnd() * 0.05, 0.25 * v + rnd() * 0.06, 0.075 * v)
       crowns.setColorAt(n, col)
       n++
     }
     treeTotal = n
-    treeMeshes.push(crowns, trunks)
-    crowns.count = trunks.count = Math.round(n * opts.detail)
+    treeMeshes.push(crowns, trunks, shadows)
+    crowns.count = trunks.count = shadows.count = Math.round(n * opts.detail)
     crowns.castShadow = true; crowns.receiveShadow = true
-    crowns.matrixAutoUpdate = trunks.matrixAutoUpdate = false
-    crowns.frustumCulled = trunks.frustumCulled = false
+    crowns.matrixAutoUpdate = trunks.matrixAutoUpdate = shadows.matrixAutoUpdate = false
+    crowns.frustumCulled = trunks.frustumCulled = shadows.frustumCulled = false
+    shadows.renderOrder = 1
     if (crowns.instanceColor) crowns.instanceColor.needsUpdate = true
-    group.add(crowns, trunks)
+    group.add(crowns, trunks, shadows)
   }
 
   group.updateMatrixWorld(true)

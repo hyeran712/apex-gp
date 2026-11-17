@@ -17,18 +17,22 @@ import {
 } from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { CAR, type VehicleState } from './vehiclePhysics'
+import { PLAYER_DRIVER, type Livery } from '../race/drivers'
 import { makeCarbon, makeDecal, makeLivery, makeTyre } from '../gfx/textures'
+
+/** The few state values a car's animation needs (the player's VehicleState has them all). */
+export type CarAnim = Pick<VehicleState, 'wheelRot' | 'steerAngle' | 'steerInput' | 'gLong' | 'gLat' | 'speed' | 'brake' | 'throttle'>
 
 export interface CarVisual {
   root: Group
   /** true when this is the built-in procedural stand-in */
   placeholder: boolean
-  update(state: VehicleState, dt: number): void
+  update(state: CarAnim, dt: number): void
   setCockpitView(on: boolean): void
   dispose(): void
 }
 
-export const LIVERY = { primary: '#123c9c', accent: '#ff5a1f', dark: '#0b0c0f' }
+export const LIVERY: Livery = PLAYER_DRIVER.livery
 
 // ---------------------------------------------------------------------------
 // geometry helpers
@@ -279,10 +283,10 @@ function buildWheel(width: number, mats: Record<string, Material>) {
   return spin
 }
 
-export function buildProceduralCar(): CarVisual {
+export function buildProceduralCar(liv: Livery = LIVERY): CarVisual {
   const carbonTex = makeCarbon()
   carbonTex.map.repeat.set(10, 10); carbonTex.normalMap.repeat.set(10, 10); carbonTex.roughnessMap.repeat.set(10, 10)
-  const livery = makeLivery(LIVERY.primary, LIVERY.accent, LIVERY.dark)
+  const livery = makeLivery(liv.primary, liv.accent, liv.dark)
   const tyreTex = makeTyre()
   const textures = [carbonTex.map, carbonTex.normalMap, carbonTex.roughnessMap, livery, tyreTex]
 
@@ -290,8 +294,8 @@ export function buildProceduralCar(): CarVisual {
   const brake = new MeshStandardMaterial({ color: '#2a0303', emissive: new Color('#ff1a12'), emissiveIntensity: 0.6, roughness: 0.4 })
   const mats: Record<string, Material> = {
     livery: new MeshPhysicalMaterial({ ...paintBase, map: livery }),
-    paint: new MeshPhysicalMaterial({ ...paintBase, color: LIVERY.primary }),
-    accent: new MeshPhysicalMaterial({ ...paintBase, color: LIVERY.accent }),
+    paint: new MeshPhysicalMaterial({ ...paintBase, color: liv.primary }),
+    accent: new MeshPhysicalMaterial({ ...paintBase, color: liv.accent }),
     white: new MeshPhysicalMaterial({ ...paintBase, color: '#f1f1ee', metalness: 0.1 }),
     carbon: new MeshPhysicalMaterial({
       color: '#ffffff', map: carbonTex.map, normalMap: carbonTex.normalMap, roughnessMap: carbonTex.roughnessMap,
@@ -496,10 +500,10 @@ export function buildProceduralCar(): CarVisual {
 
   // --- decals ---------------------------------------------------------------
   const decalTextures = [
-    makeDecal('7', '#ffffff', { w: 256, h: 256 }),
+    makeDecal(liv.number, '#ffffff', { w: 256, h: 256 }),
     makeDecal('APEX', '#ffffff'),
     makeDecal('NORDWIND', '#ffffff', { w: 1024, h: 128 }),
-    makeDecal('VELOX', LIVERY.accent),
+    makeDecal('VELOX', liv.accent),
   ]
   textures.push(...decalTextures)
   const decal = (tex: (typeof decalTextures)[number], w: number, h: number, x: number, y: number, z: number, ry: number, rx = 0) => {

@@ -7,6 +7,7 @@ import { VehicleSim, FIXED_DT, type VehicleInput } from '../src/game/vehicle/veh
 import { autopilot } from '../src/game/vehicle/autopilot'
 import { LapTimer, formatTime } from '../src/game/timing/lapTimer'
 import { track } from '../src/game/track/trackData'
+import { Race } from '../src/game/race/race'
 
 let failed = 0
 const check = (name: string, ok: boolean, info = '') => {
@@ -139,6 +140,65 @@ const input: VehicleInput = { throttle: 0, brake: 0, steer: 0, hardBrake: false 
   drive(10, L * 0.5, 0.5); drive(L * 0.5, L * 0.52, 0.5, 4); drive(L * 0.52, L + 10, 0.5)
   const dirty = evs().find(e => e.type === 'lap')
   check('track-limits lap is completed but invalid', !!dirty && dirty.valid === false && dirty.isBest === false)
+}
+
+// 7. race: AI field, grid, overtaking, finishing
+{
+  const LAPS = 2
+  for (const difficulty of ['easy', 'hard'] as const) {
+    const sim = new VehicleSim()
+    const race = new Race(LAPS, difficulty, 8, 0)
+    const slot = race.playerSlot
+    sim.teleport((track.count - Math.round(Race.gridDistance(slot) / 2)) % track.count, Race.gridLateral(slot))
+    race.cars.forEach(c => { c.body = sim.addKinematicCar() })
+    const timer = new LapTimer(); timer.best = null; timer.reset(sim.state.loc.s)
+    const race2 = new Race(LAPS, difficulty, 8, sim.state.loc.s)
+    race2.cars.forEach(c => { c.body = sim.addKinematicCar() })
+    const r = race2
+    const startPos = r.playerPosition(0)
+    let t = 0, maxPos = startPos, minPos = startPos, impacts = 0, nan = false, overlaps = 0
+    while (t < 260 && !r.cars.every(c => c.finished)) {
+      autopilot(sim.state, input)
+      sim.step(input)
+      r.step(FIXED_DT, { s: sim.state.loc.s, d: sim.state.loc.d, v: sim.state.speed }, t > 2)
+      if (t % 1 < FIXED_DT) { const pos = r.playerPosition(sim.state.speed); maxPos = Math.max(maxPos, pos); minPos = Math.min(minPos, pos) }
+      for (const c of r.cars) {
+        if (!isFinite(c.x) || !isFinite(c.D)) nan = true
+        for (const o of r.cars) if (o !== c && Math.abs(o.D - c.D) < 3.5 && Math.abs(o.d - c.d) < 1.2) overlaps++
+      }
+      t += FIXED_DT
+    }
+    impacts = sim.state.impactCount
+    const st = r.standings(sim.state.speed)
+    const me = st.find(x => x.isPlayer)!
+    check(`race (${difficulty}): the whole AI field finishes ${LAPS} laps`, r.cars.every(c => c.finished), `${t.toFixed(0)} s, player P${me.pos}/8, AI times ${r.cars.map(c => c.finishTime.toFixed(0)).join(' ')}`)
+    check(`race (${difficulty}): no NaN, AI do not drive through each other`, !nan && overlaps < 60, `overlap steps ${overlaps}`)
+    check(`race (${difficulty}): player moves through the field`, minPos < startPos || difficulty === 'easy', `grid P${startPos}, best P${minPos}, worst P${maxPos}, wall/car impacts ${impacts}`)
+  }
+}
+
+// 8. a slow player on the racing line: the field must get past without shoving
+{
+  const sim = new VehicleSim()
+  const race = new Race(2, 'normal', 8, 0)
+  const slot = race.playerSlot
+  sim.teleport((track.count - Math.round(Race.gridDistance(slot) / 2)) % track.count, Race.gridLateral(slot))
+  const r = new Race(2, 'normal', 8, sim.state.loc.s)
+  r.cars.forEach(c => { c.body = sim.addKinematicCar() })
+  let t = 0, nan = false, earlyImpacts = 0
+  while (t < 70) {
+    autopilot(sim.state, input)
+    if (sim.state.speed > 38) { input.throttle = 0; input.brake = Math.max(input.brake, sim.state.speed > 42 ? 1 : 0) } // ~137 km/h
+    sim.step(input)
+    r.step(FIXED_DT, { s: sim.state.loc.s, d: sim.state.loc.d, v: sim.state.speed }, t > 2)
+    if (r.cars.some(c => !isFinite(c.x))) nan = true
+    t += FIXED_DT
+    // the first 18 s is the main straight: any contact there is the AI's doing
+    if (t < 18) earlyImpacts = sim.state.impactCount
+  }
+  const pos = r.playerPosition(sim.state.speed)
+  check('slow player is overtaken by the field', !nan && pos >= 7, `P${pos}/8 after 70 s`)
+  check('AI cars do not run into a slow player on the straight', earlyImpacts === 0, `${earlyImpacts} contacts in the first 18 s`)
 }
 
 console.log(failed ? `\n${failed} check(s) failed` : '\nAll checks passed')

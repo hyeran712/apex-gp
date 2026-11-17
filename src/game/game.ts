@@ -3,9 +3,13 @@
  * advances them once per rendered frame. React components only *read* from it.
  */
 import RAPIER from '@dimforge/rapier3d-compat'
+import type { PerspectiveCamera } from 'three'
 import { AudioEngine } from './audio/AudioEngine'
+import { IS_TOUCH_DEVICE } from './device'
 import { Keyboard } from './input'
-import { useStore } from './store'
+import { Race } from './race/race'
+import { useStore, type ResultRow } from './store'
+import { track } from './track/trackData'
 import { LapTimer, formatTime, clearBest } from './timing/lapTimer'
 import { autopilot } from './vehicle/autopilot'
 import { CAR, VehicleSim, type VehicleInput } from './vehicle/vehiclePhysics'
@@ -19,8 +23,12 @@ class Game {
   audio = new AudioEngine()
   input: VehicleInput = { throttle: 0, brake: 0, steer: 0, hardBrake: false }
   ready = false
+  /** active race (null in time-trial mode) */
+  race: Race | null = null
+  /** set by the camera rig; used to project name tags */
+  camera: PerspectiveCamera | null = null
   /** interpolated render pose */
-  pose = { x: 0, z: 0, yaw: 0 }
+  pose = { x: 0, y: 0, z: 0, yaw: 0, pitch: 0, roll: 0 }
   /** decaying 0..1 kick for camera shake after impacts */
   impactShake = 0
   autopilot = typeof location !== 'undefined' && new URLSearchParams(location.search).has('autopilot')
@@ -54,7 +62,21 @@ class Game {
     this.audio.setVolume(st.volume)
     this.audio.setEngineSound(st.engineSound)
     this.audio.resume()
-    this.sim.placeOnGrid()
+    this.sim.clearKinematics()
+    this.race = null
+    if (st.mode === 'race') {
+      // smaller field on phones to keep the frame rate up
+      const total = IS_TOUCH_DEVICE ? 6 : 8
+      const slot = Math.min(5, total - 2)
+      this.sim.teleport((track.count - Math.round(Race.gridDistance(slot) / 2)) % track.count, Race.gridLateral(slot))
+      this.race = new Race(st.raceLaps, st.difficulty, total, this.sim.state.loc.s)
+      for (const c of this.race.cars) {
+        c.body = this.sim.addKinematicCar()
+        c.step(0, false, 1, [])
+      }
+    } else {
+      this.sim.placeOnGrid()
+    }
     this.timer.reset(this.sim.state.loc.s)
     this.syncPose(1)
     this.keys.clear()
@@ -62,12 +84,12 @@ class Game {
     this.goAt = LIGHT_INTERVAL * 5 + 0.7 + Math.random() * 1.1
     this.impactShake = 0
     this.lastImpact = this.sim.state.impactCount
-    st.set({ phase: 'countdown', lights: 0, toast: null })
+    st.set({ phase: 'countdown', lights: 0, toast: null, results: null, raceId: st.raceId + 1 })
   }
 
   cycleCamera() {
     const st = useStore.getState()
-    if (st.phase === 'racing' || st.phase === 'countdown') st.set({ camera: (st.camera + 1) % 3 })
+    if (st.phase === 'racing' || st.phase === 'countdown' || st.phase === 'finished') st.set({ camera: (st.camera + 1) % 3 })
   }
 
   resetCar() {
@@ -93,10 +115,13 @@ class Game {
   quitToMenu() {
     this.audio.resume()
     this.audio.silence()
+    this.sim.clearKinematics()
+    this.race = null
     this.sim.placeOnGrid()
     this.timer.reset(this.sim.state.loc.s)
     this.syncPose(1)
-    useStore.getState().set({ phase: 'menu', lights: 0, toast: null })
+    const st = useStore.getState()
+    st.set({ phase: 'menu', lights: 0, toast: null, results: null, raceId: st.raceId + 1 })
   }
 
   clearBestLap() {
@@ -130,14 +155,22 @@ class Game {
       return
     }
 
-    if (st.phase !== 'racing') return
+    if (st.phase !== 'racing' && st.phase !== 'finished') return
 
-    this.keys.read(this.input)
+    const done = st.phase === 'finished'
+    if (done) {
+      // the flag has fallen: coast to a stop with gentle braking
+      this.input.throttle = 0; this.input.brake = 0.6; this.input.steer = 0; this.input.hardBrake = false
+    } else {
+      this.keys.read(this.input)
+    }
     const alpha = this.sim.update(dt, this.input, step => {
-      if (this.autopilot) autopilot(s, this.input)
+      if (this.autopilot && !done) autopilot(s, this.input)
       this.timer.update(step, s.loc.s, s.wheelsOff, s.vx)
+      this.race?.step(step, { s: s.loc.s, d: s.loc.d, v: s.speed }, true)
     })
     this.syncPose(alpha)
+    if (this.race?.playerFinished && !done) this.finishRace()
 
     let e
     while ((e = this.timer.poll())) {
@@ -161,10 +194,26 @@ class Game {
     this.audio.update(s)
   }
 
+  /** The player took the flag: freeze the classification and show the results. */
+  private finishRace() {
+    const race = this.race
+    if (!race) return
+    const rows = race.standings(this.sim.state.speed)
+    const results: ResultRow[] = rows.map(r => ({
+      pos: r.pos, name: r.name, code: r.code, color: r.color, isPlayer: r.isPlayer,
+      time: r.finishTime ?? 0, gap: r.gap, estimated: r.estimated,
+    }))
+    useStore.getState().set({ phase: 'finished', results })
+    this.audio.beep(1320, 0.4)
+  }
+
   private syncPose(alpha: number) {
     const s = this.sim.state, p = this.sim.prev
     this.pose.x = p.x + (s.x - p.x) * alpha
     this.pose.z = p.z + (s.z - p.z) * alpha
+    this.pose.y = p.y + (s.y - p.y) * alpha
+    this.pose.pitch = s.pitch
+    this.pose.roll = s.roll
     let dy = s.yaw - p.yaw
     if (dy > Math.PI) dy -= Math.PI * 2
     else if (dy < -Math.PI) dy += Math.PI * 2

@@ -5,7 +5,9 @@
  * or DOM dependency, so the physics / lap timing can be simulated headlessly
  * (see scripts/simTest.ts).
  *
- * Conventions: the world is Y-up and the circuit is flat (y = 0).
+ * Conventions: the world is Y-up. Elevation is a function of distance along
+ * the lap only (no camber); the physics runs in the ground plane and treats
+ * gradients as forces (see vehiclePhysics.ts).
  *   tangent  t = (tx, tz)      direction of travel
  *   right    r = (-tz, tx)     points to the driver's right
  *   lateral offset d > 0  =>   right of the centre line
@@ -23,6 +25,11 @@ export interface TrackDef {
   /** one-line character description for the menu */
   blurb: string
   /**
+   * Elevation profile as [fraction of the lap, height in metres] knots. The
+   * pit straight is always level (height 0); heights are smoothed between knots.
+   */
+  elevation: [number, number][]
+  /**
    * Closed-loop control points (x, z) in metres. Every circuit shares one
    * convention so the pit complex fits: the start straight runs along +X
    * through the origin, and the rest of the lap lies on the +Z side.
@@ -35,6 +42,8 @@ export const TRACKS: TrackDef[] = [
     id: 'costa-verde',
     name: 'Circuito Costa Verde',
     blurb: 'Technical: tight hairpin and S-curves',
+    // climbs out of the hairpin, dips through the S-curves, crests before the run home
+    elevation: [[0.2, -3], [0.36, 13], [0.5, 9], [0.6, 3], [0.74, 15], [0.86, 5]],
     points: [
       [-480, 0], [-240, 0], [0, 0], [240, 0], [470, 0], [560, 0],
       // T1-T2: tight hairpin
@@ -54,6 +63,8 @@ export const TRACKS: TrackDef[] = [
     id: 'monte-alto',
     name: 'Autodromo Monte Alto',
     blurb: 'Fast: long straights and sweeping corners',
+    // a long climb to the back straight, then a fast descent through the esses
+    elevation: [[0.2, 6], [0.34, 20], [0.48, 24], [0.58, 12], [0.68, 16], [0.8, 4]],
     points: [
       [-560, 0], [-420, 0], [-280, 0], [0, 0], [280, 0], [560, 0], [690, 0],
       // T1: fast right
@@ -77,6 +88,8 @@ export const TRACKS: TrackDef[] = [
     id: 'sierra-norte',
     name: 'Sierra Norte Raceway',
     blurb: 'Mixed: two hairpins, a long back straight and esses',
+    // drops into the hairpin bowl, climbs the loop to a high back straight
+    elevation: [[0.17, 5], [0.31, -6], [0.44, 10], [0.58, 20], [0.7, 14], [0.82, 6]],
     points: [
       [-610, 0], [-450, 0], [-300, 0], [-150, 0], [0, 0], [200, 0], [400, 0], [500, 0],
       // T1: medium right, then a short run north
@@ -139,6 +152,10 @@ export interface TrackSample {
   /** gravel trap present on that side (starts GRAVEL_START from the centre) */
   gravelL: boolean
   gravelR: boolean
+  /** height of the road surface (m), its gradient dy/ds and vertical curvature d2y/ds2 */
+  y: number
+  dy: number
+  ddy: number
 }
 
 export const GRAVEL_START = TRACK_HALF_WIDTH + CURB_WIDTH + 2.4
@@ -210,11 +227,39 @@ function buildTrack(): Track {
     tz /= len
     samples.push({
       x: p.x, z: p.z, tx, tz, s, k: 0,
-      wallL: 0, wallR: 0, curbL: false, curbR: false, gravelL: false, gravelR: false,
+      wallL: 0, wallR: 0, curbL: false, curbR: false, gravelL: false, gravelR: false, y: 0, dy: 0, ddy: 0,
     })
     s += Math.hypot(b.x - p.x, b.z - p.z)
   }
   const length = s
+
+  // --- elevation ------------------------------------------------------------
+  {
+    const flatA = PIT.after + 130, flatB = length - PIT.before - 150
+    const knots: [number, number][] = [[flatA, 0]]
+    for (const [f, h] of trackDef.elevation) {
+      const ks = f * length
+      if (ks > flatA + 90 && ks < flatB - 90) knots.push([ks, h])
+    }
+    knots.push([flatB, 0])
+    let ys: number[] = samples.map(c => {
+      if (c.s <= flatA || c.s >= flatB) return 0
+      let i = 0
+      while (i < knots.length - 2 && c.s > knots[i + 1][0]) i++
+      const [s0, y0] = knots[i], [s1, y1] = knots[i + 1]
+      // cubic Hermite with Catmull-Rom tangents; level where the profile meets the pit straight
+      const m0 = i === 0 ? 0 : (y1 - knots[i - 1][1]) / (s1 - knots[i - 1][0])
+      const m1 = i === knots.length - 2 ? 0 : (knots[i + 2][1] - y0) / (knots[i + 2][0] - s0)
+      const h = s1 - s0, t = (c.s - s0) / h, t2 = t * t, t3 = t2 * t
+      return (2 * t3 - 3 * t2 + 1) * y0 + (t3 - 2 * t2 + t) * h * m0 + (-2 * t3 + 3 * t2) * y1 + (t3 - t2) * h * m1
+    })
+    ys = smooth(smooth(ys, 10), 10)
+    let dys = ys.map((_, i) => (ys[(i + 1) % count] - ys[(i - 1 + count) % count]) / (2 * SAMPLE_SPACING))
+    dys = smooth(dys, 4)
+    let ddys = dys.map((_, i) => (dys[(i + 1) % count] - dys[(i - 1 + count) % count]) / (2 * SAMPLE_SPACING))
+    ddys = smooth(ddys, 6)
+    for (let i = 0; i < count; i++) { samples[i].y = ys[i]; samples[i].dy = dys[i]; samples[i].ddy = ddys[i] }
+  }
 
   // Signed curvature from the change of tangent.
   let kRaw: number[] = []
@@ -366,6 +411,15 @@ export function locate(x: number, z: number, hint: number, out?: TrackLocation):
   if (s >= track.length) s -= track.length
   res.s = s
   return res
+}
+
+/** Road height under a located point (constant across the width of the track). */
+export function heightAt(loc: TrackLocation): number {
+  const c = track.samples[loc.index]
+  let along = loc.s - c.s
+  if (along > track.length / 2) along -= track.length
+  else if (along < -track.length / 2) along += track.length
+  return c.y + c.dy * along
 }
 
 export type Surface = 'asphalt' | 'curb' | 'grass' | 'gravel'

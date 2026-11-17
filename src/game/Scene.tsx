@@ -15,7 +15,7 @@ import { resolveQuality, type QualitySettings } from './quality'
 import { useStore } from './store'
 import { buildTrackScene, type TrackScene } from './track/trackScene'
 import { loadCarVisual } from './vehicle/carLoader'
-import type { CarVisual } from './vehicle/proceduralCar'
+import { buildProceduralCar, type CarVisual } from './vehicle/proceduralCar'
 
 interface Assets { track: TrackScene; car: CarVisual; env: EnvAsset }
 
@@ -75,11 +75,37 @@ function Car({ assets }: { assets: Assets }) {
   }, [camera, phase, assets])
   useFrame((_, dt) => {
     const root = assets.car.root
-    root.position.set(game.pose.x, 0, game.pose.z)
-    root.rotation.y = game.pose.yaw
+    // yaw first, then the road's pitch and cross-slope in the car's own frame
+    root.position.set(game.pose.x, game.pose.y, game.pose.z)
+    root.rotation.set(-game.pose.roll, game.pose.yaw, game.pose.pitch, 'YZX')
     if (useStore.getState().phase !== 'paused') assets.car.update(game.sim.state, Math.min(dt, 0.05))
   }, -2)
   return <primitive object={assets.car.root} />
+}
+
+/** The AI opponents' meshes; rebuilt whenever a session (re)starts. */
+function AiCars() {
+  const raceId = useStore(s => s.raceId)
+  const [visuals, setVisuals] = useState<CarVisual[]>([])
+  useEffect(() => {
+    const race = game.race
+    if (!race) { setVisuals([]); return }
+    const built = race.cars.map(c => buildProceduralCar(c.spec.livery))
+    setVisuals(built)
+    return () => { built.forEach(v => v.dispose()) }
+  }, [raceId])
+  useFrame((_, dt) => {
+    const race = game.race
+    if (!race || visuals.length !== race.cars.length) return
+    const running = useStore.getState().phase !== 'paused'
+    race.cars.forEach((c, i) => {
+      const v = visuals[i]
+      v.root.position.set(c.x, c.y, c.z)
+      v.root.rotation.set(-c.roll, c.yaw, c.pitch, 'YZX')
+      if (running) v.update(c, Math.min(dt, 0.05))
+    })
+  }, -2)
+  return <>{visuals.map((v, i) => <primitive key={i} object={v.root} />)}</>
 }
 
 /** Sun + image-based lighting + sky + atmosphere. The shadow frustum follows the car. */
@@ -157,9 +183,9 @@ function Lighting({ env, q }: { env: EnvAsset; q: QualitySettings }) {
     sky.position.copy(camera.position)
     const l = light.current
     if (!l) return
-    const { x, z } = game.pose
-    l.position.set(x + env.sun.x * 160, env.sun.y * 160, z + env.sun.z * 160)
-    l.target.position.set(x, 0, z)
+    const { x, y, z } = game.pose
+    l.position.set(x + env.sun.x * 160, y + env.sun.y * 160, z + env.sun.z * 160)
+    l.target.position.set(x, y, z)
     l.target.updateMatrixWorld()
   })
 
@@ -251,6 +277,7 @@ export function Scene() {
           <Lighting env={assets.env} q={q} />
           <World assets={assets} q={q} />
           <Car assets={assets} />
+          <AiCars />
           <CameraRig />
           {/* Rebuild the post-processing chain whenever the render resolution changes:
               the AO pass keeps buffers of the old size otherwise and draws a
